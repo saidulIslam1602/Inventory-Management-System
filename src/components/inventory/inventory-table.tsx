@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * InventoryTable — client component for browsing and searching products.
- * Shows stock level per location with color-coded low-stock indicators.
+ * InventoryTable — product catalog table with search and filters
+ * (category, supplier, location, stock health) typical of IMS UIs.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Edit2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Edit2, AlertTriangle, CheckCircle2, Filter } from "lucide-react";
 import { DataTable, type Column } from "@/components/shared/data-table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { cn, formatQuantityNbNo } from "@/lib/utils";
+import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
 
 interface StockEntry {
   id: string;
@@ -23,26 +25,122 @@ interface StockEntry {
 interface ProductRow {
   id: string;
   sku: string;
+  barcode?: string | null;
   name: string;
   unitPrice: { toString: () => string } | number | string;
-  category: { name: string };
+  category: { id: string; name: string };
+  supplier?: { id: string; name: string } | null;
   unit: { symbol: string };
-  supplier?: { name: string } | null;
   stock: StockEntry[];
+}
+
+export interface InventoryFilterOption {
+  id: string;
+  name: string;
 }
 
 interface InventoryTableProps {
   products: ProductRow[];
   canEdit: boolean;
+  categories: InventoryFilterOption[];
+  suppliers: InventoryFilterOption[];
+  locations: InventoryFilterOption[];
 }
 
-export function InventoryTable({ products, canEdit }: InventoryTableProps) {
+type StockHealthFilter = "all" | "low" | "healthy";
+
+const NO_SUPPLIER = "__none__";
+
+export function InventoryTable({
+  products,
+  canEdit,
+  categories,
+  suppliers,
+  locations,
+}: InventoryTableProps) {
+  const [categoryId, setCategoryId] = useState("");
+  const [supplierId, setSupplierId] = useState("");
+  const [locationId, setLocationId] = useState("");
+  const [stockHealth, setStockHealth] = useState<StockHealthFilter>("all");
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      if (categoryId && p.category.id !== categoryId) return false;
+
+      if (supplierId) {
+        if (supplierId === NO_SUPPLIER) {
+          if (p.supplier != null) return false;
+        } else if (p.supplier?.id !== supplierId) {
+          return false;
+        }
+      }
+
+      if (locationId) {
+        const atLoc = p.stock.some((s) => s.location.id === locationId);
+        if (!atLoc) return false;
+      }
+
+      if (stockHealth !== "all") {
+        const hasLow = p.stock.some((s) => Number(s.quantity) <= Number(s.reorderPoint));
+        if (stockHealth === "low" && !hasLow) return false;
+        if (stockHealth === "healthy" && hasLow) return false;
+      }
+
+      return true;
+    });
+  }, [products, categoryId, supplierId, locationId, stockHealth]);
+
+  const hasActiveFilters =
+    categoryId !== "" || supplierId !== "" || locationId !== "" || stockHealth !== "all";
+
+  function exportFilteredCsv() {
+    const headers = [
+      "SKU",
+      "Barcode",
+      "Name",
+      "Category",
+      "Supplier",
+      "Unit price (kr)",
+      "Stock by location",
+    ];
+    const data = filteredProducts.map((p) => [
+      p.sku,
+      p.barcode ?? "",
+      p.name,
+      p.category.name,
+      p.supplier?.name ?? "",
+      Number(p.unitPrice).toLocaleString("nb-NO", { minimumFractionDigits: 2 }),
+      p.stock
+        .map(
+          (s) =>
+            `${s.location.name}: ${formatQuantityNbNo(Number(s.quantity), p.unit.symbol)} ${p.unit.symbol}${
+              Number(s.quantity) <= Number(s.reorderPoint) ? " (low)" : ""
+            }`
+        )
+        .join(" | "),
+    ]);
+    const blob = new Blob([withUtf8Bom(rowsToCsv(headers, data))], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `inventory-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const columns: Column<ProductRow>[] = [
     {
       key: "sku",
       header: "SKU",
+      render: (p) => <span className="text-muted-foreground font-mono text-xs">{p.sku}</span>,
+    },
+    {
+      key: "barcode",
+      header: "Barcode",
       render: (p) => (
-        <span className="font-mono text-xs text-muted-foreground">{p.sku}</span>
+        <span className="text-muted-foreground font-mono text-xs">{p.barcode?.trim() || "—"}</span>
       ),
     },
     {
@@ -50,8 +148,8 @@ export function InventoryTable({ products, canEdit }: InventoryTableProps) {
       header: "Product",
       render: (p) => (
         <div>
-          <div className="font-medium text-foreground">{p.name}</div>
-          <div className="text-xs text-muted-foreground">{p.category.name}</div>
+          <div className="text-foreground font-medium">{p.name}</div>
+          <div className="text-muted-foreground text-xs">{p.category.name}</div>
         </div>
       ),
     },
@@ -73,8 +171,8 @@ export function InventoryTable({ products, canEdit }: InventoryTableProps) {
                   className={cn(
                     "inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium",
                     isLow
-                      ? "bg-destructive/10 text-destructive border border-destructive/20"
-                      : "bg-primary/10 text-primary border border-primary/20"
+                      ? "bg-destructive/10 text-destructive border-destructive/20 border"
+                      : "bg-primary/10 text-primary border-primary/20 border"
                   )}
                 >
                   {isLow ? (
@@ -83,7 +181,7 @@ export function InventoryTable({ products, canEdit }: InventoryTableProps) {
                     <CheckCircle2 className="h-3 w-3" />
                   )}
                   <span>{s.location.name}</span>
-                  <span className="font-bold">{qty}</span>
+                  <span className="font-bold">{formatQuantityNbNo(qty, p.unit.symbol)}</span>
                   <span className="text-[10px] opacity-70">{p.unit.symbol}</span>
                 </div>
               );
@@ -127,14 +225,125 @@ export function InventoryTable({ products, canEdit }: InventoryTableProps) {
       : []),
   ];
 
+  const toolbar = (
+    <div className="border-border bg-muted/15 space-y-3 rounded-lg border px-4 py-3">
+      <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs font-medium">
+        <Filter className="h-3.5 w-3.5" />
+        <span>Filter catalog</span>
+        {hasActiveFilters && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => {
+              setCategoryId("");
+              setSupplierId("");
+              setLocationId("");
+              setStockHealth("all");
+            }}
+          >
+            Clear all
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={exportFilteredCsv}
+        >
+          Export CSV (filtered)
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-xs">Category</Label>
+          <NativeSelect
+            size="sm"
+            className="w-full max-w-none"
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value)}
+          >
+            <NativeSelectOption value="">All categories</NativeSelectOption>
+            {categories.map((c) => (
+              <NativeSelectOption key={c.id} value={c.id}>
+                {c.name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-xs">Supplier</Label>
+          <NativeSelect
+            size="sm"
+            className="w-full max-w-none"
+            value={supplierId}
+            onChange={(e) => setSupplierId(e.target.value)}
+          >
+            <NativeSelectOption value="">All suppliers</NativeSelectOption>
+            <NativeSelectOption value={NO_SUPPLIER}>No supplier</NativeSelectOption>
+            {suppliers.map((s) => (
+              <NativeSelectOption key={s.id} value={s.id}>
+                {s.name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-xs">Stock at location</Label>
+          <NativeSelect
+            size="sm"
+            className="w-full max-w-none"
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+          >
+            <NativeSelectOption value="">Any location</NativeSelectOption>
+            {locations.map((l) => (
+              <NativeSelectOption key={l.id} value={l.id}>
+                {l.name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground text-xs">Stock health</Label>
+          <NativeSelect
+            size="sm"
+            className="w-full max-w-none"
+            value={stockHealth}
+            onChange={(e) => setStockHealth(e.target.value as StockHealthFilter)}
+          >
+            <NativeSelectOption value="all">All</NativeSelectOption>
+            <NativeSelectOption value="low">Low / reorder or below</NativeSelectOption>
+            <NativeSelectOption value="healthy">Above reorder everywhere</NativeSelectOption>
+          </NativeSelect>
+        </div>
+      </div>
+      {hasActiveFilters && (
+        <p className="text-muted-foreground text-xs">
+          Showing {filteredProducts.length} of {products.length} products
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div className="px-1">
       <DataTable
-        data={products}
+        data={filteredProducts}
         columns={columns}
+        toolbar={toolbar}
         searchPlaceholder="Search products by name or SKU..."
         searchKeys={["name", "sku"]}
         pageSize={20}
+        emptyState={
+          <div className="text-muted-foreground text-sm">
+            {hasActiveFilters
+              ? "No products match the current filters. Try clearing or changing them."
+              : "No data available."}
+          </div>
+        }
       />
     </div>
   );

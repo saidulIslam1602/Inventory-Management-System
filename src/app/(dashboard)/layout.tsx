@@ -5,7 +5,7 @@
  * - Header (breadcrumb, notifications, user menu)
  * - TooltipProvider (required by shadcn components)
  *
- * Session is read server-side; unauthenticated access is blocked by middleware.
+ * Session is read server-side; unauthenticated access is blocked by the root proxy.
  */
 
 import { redirect } from "next/navigation";
@@ -17,36 +17,70 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 
+/** Skip Prisma during `next build` static phase when no database is reachable (CI / fresh clone). */
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
   // Fetch sidebar badge counts (low-stock alerts, pending POs, unread notifications)
   // Low-stock requires a raw query since Prisma cannot compare two columns in a where clause
-  const [lowStockResult, pendingPOCount, notificationCount] = await Promise.all([
-    prisma.$queryRaw<[{ count: bigint }]>`
+  const [lowStockResult, pendingPOCount, notificationCount, employeeForSidebar] = await Promise.all(
+    [
+      prisma.$queryRaw<[{ count: bigint }]>`
       SELECT COUNT(*) as count FROM stock WHERE quantity <= "reorderPoint" AND "reorderPoint" > 0
     `.catch(() => [{ count: BigInt(0) }]),
-    prisma.purchaseOrder.count({
-      where: { status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
-    }).catch(() => 0),
-    prisma.notification.count({
-      where: { userId: session.user.id, isRead: false },
-    }).catch(() => 0),
-  ]);
+      prisma.purchaseOrder
+        .count({
+          where: { status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
+        })
+        .catch(() => 0),
+      prisma.notification
+        .count({
+          where: { userId: session.user.id, isRead: false },
+        })
+        .catch(() => 0),
+      prisma.employee
+        .findUnique({
+          where: { userId: session.user.id },
+          select: { locationId: true },
+        })
+        .catch(() => null),
+    ]
+  );
+
   const lowStockCount = Number(lowStockResult[0]?.count ?? 0);
+
+  const locLow =
+    employeeForSidebar &&
+    (session.user.role === "STAFF" ||
+      session.user.role === "MANAGER" ||
+      session.user.role === "ADMIN")
+      ? await prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(*)::bigint as count FROM stock s
+        WHERE s."locationId" = ${employeeForSidebar.locationId}
+          AND s.quantity <= s."reorderPoint" AND s."reorderPoint" > 0
+      `.catch(() => [{ count: BigInt(0) }])
+      : [{ count: BigInt(0) }];
+  const myBranchLowStockCount = Number(locLow[0]?.count ?? 0);
+
+  const inventoryBadgeCount = session.user.role === "STAFF" ? myBranchLowStockCount : lowStockCount;
 
   return (
     <TooltipProvider>
       <SidebarProvider>
-        <AppSidebar lowStockCount={lowStockCount} pendingPOCount={pendingPOCount} />
+        <AppSidebar
+          userRole={session.user.role}
+          lowStockCount={inventoryBadgeCount}
+          pendingPOCount={pendingPOCount}
+        />
         <SidebarInset>
-          <Header
-            user={session.user}
-            notificationCount={notificationCount}
-          />
-          <main className="flex-1 p-6 bg-background min-h-[calc(100vh-3.5rem)]">
-            {children}
+          <Header user={session.user} notificationCount={notificationCount} />
+          <main className="from-muted/35 via-background to-background min-h-[calc(100vh-3.5rem)] flex-1 bg-gradient-to-b">
+            <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
+              {children}
+            </div>
           </main>
         </SidebarInset>
       </SidebarProvider>

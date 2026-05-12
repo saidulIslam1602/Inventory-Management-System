@@ -5,7 +5,7 @@
  */
 
 import type { Metadata } from "next";
-import { Package, ShoppingCart, Users, FolderKanban, AlertTriangle, ArrowUpDown } from "lucide-react";
+import { Package, ShoppingCart, FolderKanban, AlertTriangle, ArrowUpDown } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { StatsCard } from "@/components/shared/stats-card";
 import { PageHeader } from "@/components/shared/page-header";
@@ -13,16 +13,67 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { StockTrendChart } from "@/components/inventory/stock-trend-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { format, subDays } from "date-fns";
+import { formatQuantityNbNo } from "@/lib/utils";
+import { BUSINESS_TIME_ZONE, todayOsloPrismaDate } from "@/lib/business-calendar";
+import type { ChartPeriodMode } from "@/lib/chart-period";
+import {
+  formatChartPeriodRangeDetail,
+  formatChartPeriodTitle,
+  osloPeriodUtcBounds,
+  parseChartPeriod,
+} from "@/lib/chart-period";
+import { ChartPeriodToolbar } from "@/components/shared/chart-period-toolbar";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-// Revalidate dashboard data every 60 seconds (ISR)
-export const revalidate = 60;
+async function getMovementTrendData(mode: ChartPeriodMode, offset: number) {
+  const { start, end } = osloPeriodUtcBounds(mode, offset);
 
-async function getDashboardData() {
-  const thirtyDaysAgo = subDays(new Date(), 30);
+  if (mode === "year") {
+    const monthlyMovements = await prisma.$queryRaw<
+      Array<{ date: Date; in_count: bigint; out_count: bigint }>
+    >`
+      SELECT
+        (date_trunc('month', ("createdAt" AT TIME ZONE 'Europe/Oslo')))::date as date,
+        COUNT(*) FILTER (WHERE type = 'IN') as in_count,
+        COUNT(*) FILTER (WHERE type = 'OUT') as out_count
+      FROM stock_movements
+      WHERE "createdAt" >= ${start} AND "createdAt" <= ${end}
+      GROUP BY date_trunc('month', ("createdAt" AT TIME ZONE 'Europe/Oslo'))
+      ORDER BY date ASC
+    `;
+    return monthlyMovements.map((row) => ({
+      date: row.date.toLocaleDateString("nb-NO", {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }),
+      in: Number(row.in_count),
+      out: Number(row.out_count),
+    }));
+  }
 
+  const dailyMovements = await prisma.$queryRaw<
+    Array<{ date: Date; in_count: bigint; out_count: bigint }>
+  >`
+    SELECT
+      ("createdAt" AT TIME ZONE 'Europe/Oslo')::date as date,
+      COUNT(*) FILTER (WHERE type = 'IN') as in_count,
+      COUNT(*) FILTER (WHERE type = 'OUT') as out_count
+    FROM stock_movements
+    WHERE "createdAt" >= ${start} AND "createdAt" <= ${end}
+    GROUP BY ("createdAt" AT TIME ZONE 'Europe/Oslo')::date
+    ORDER BY date ASC
+  `;
+
+  return dailyMovements.map((row) => ({
+    date: row.date.toLocaleDateString("nb-NO", { day: "numeric", month: "short", timeZone: "UTC" }),
+    in: Number(row.in_count),
+    out: Number(row.out_count),
+  }));
+}
+
+async function getDashboardData(mode: ChartPeriodMode, offset: number) {
   const [
     totalProducts,
     lowStockRaw,
@@ -31,18 +82,29 @@ async function getDashboardData() {
     todayAttendance,
     recentMovements,
     stockValueResult,
-    monthlyMovements,
   ] = await Promise.all([
     // Total active products
     prisma.product.count({ where: { isActive: true } }),
 
     // Products at or below reorder point (per location) — raw query needed for column comparison
-    prisma.$queryRaw<Array<{ id: string; quantity: number; reorderPoint: number; productName: string; productSku: string; locationName: string }>>`
+    prisma.$queryRaw<
+      Array<{
+        id: string;
+        quantity: number;
+        reorderPoint: number;
+        productName: string;
+        productSku: string;
+        locationName: string;
+        unitSymbol: string;
+      }>
+    >`
       SELECT s.id, s.quantity, s."reorderPoint",
              p.name as "productName", p.sku as "productSku",
-             l.name as "locationName"
+             l.name as "locationName",
+             u.symbol as "unitSymbol"
       FROM stock s
       JOIN products p ON s."productId" = p.id
+      JOIN units u ON p."unitId" = u.id
       JOIN locations l ON s."locationId" = l.id
       WHERE s.quantity <= s."reorderPoint" AND s."reorderPoint" > 0
       ORDER BY s.quantity ASC
@@ -57,10 +119,10 @@ async function getDashboardData() {
     // Active projects
     prisma.project.count({ where: { status: "IN_PROGRESS" } }),
 
-    // Today's present employees
+    // Today's present employees (Oslo calendar day — matches @db.Date attendance rows)
     prisma.attendance.count({
       where: {
-        date: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        date: { equals: todayOsloPrismaDate() },
         status: "PRESENT",
       },
     }),
@@ -72,7 +134,13 @@ async function getDashboardData() {
       include: {
         stock: {
           include: {
-            product: { select: { name: true, sku: true } },
+            product: {
+              select: {
+                name: true,
+                sku: true,
+                unit: { select: { symbol: true } },
+              },
+            },
             location: { select: { name: true } },
           },
         },
@@ -86,19 +154,9 @@ async function getDashboardData() {
       FROM stock s
       JOIN products p ON s."productId" = p.id
     `,
-
-    // Daily IN/OUT movement counts for the last 30 days
-    prisma.$queryRaw<Array<{ date: Date; in_count: bigint; out_count: bigint }>>`
-      SELECT
-        DATE("createdAt") as date,
-        COUNT(*) FILTER (WHERE type = 'IN') as in_count,
-        COUNT(*) FILTER (WHERE type = 'OUT') as out_count
-      FROM stock_movements
-      WHERE "createdAt" >= ${thirtyDaysAgo}
-      GROUP BY DATE("createdAt")
-      ORDER BY date ASC
-    `,
   ]);
+
+  const chartData = await getMovementTrendData(mode, offset);
 
   const totalStockValue = Number(stockValueResult[0]?.total ?? 0);
 
@@ -107,15 +165,8 @@ async function getDashboardData() {
     id: r.id,
     quantity: r.quantity,
     reorderPoint: r.reorderPoint,
-    product: { name: r.productName, sku: r.productSku },
+    product: { name: r.productName, sku: r.productSku, unitSymbol: r.unitSymbol },
     location: { name: r.locationName },
-  }));
-
-  // Format chart data
-  const chartData = monthlyMovements.map((row) => ({
-    date: format(row.date, "MMM d"),
-    in: Number(row.in_count),
-    out: Number(row.out_count),
   }));
 
   return {
@@ -127,21 +178,40 @@ async function getDashboardData() {
     recentMovements,
     totalStockValue,
     chartData,
+    chartPeriod: {
+      mode,
+      offset,
+      title: formatChartPeriodTitle(mode, offset),
+      detail: formatChartPeriodRangeDetail(mode, offset),
+      bucket: mode === "year" ? ("month" as const) : ("day" as const),
+    },
   };
 }
 
-export default async function DashboardPage() {
-  const data = await getDashboardData();
+type PageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function DashboardPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+  const { mode, offset } = parseChartPeriod(sp);
+  const data = await getDashboardData(mode, offset);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Dashboard"
-        description={`Overview for ${format(new Date(), "EEEE, d MMMM yyyy")}`}
+        description={`Oversikt ${new Date().toLocaleDateString("nb-NO", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          timeZone: BUSINESS_TIME_ZONE,
+        })}`}
       />
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatsCard
           title="Total Products"
           value={data.totalProducts}
@@ -170,28 +240,49 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* ── Stock Movements Chart ── */}
-        <Card className="lg:col-span-2 border border-border shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <ArrowUpDown className="h-4 w-4 text-primary" />
-              Stock Movements — Last 30 Days
-            </CardTitle>
+        <Card className="shadow-sm lg:col-span-2">
+          <CardHeader className="space-y-3 pb-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <ArrowUpDown className="text-primary h-4 w-4" />
+                  Stock movements — {data.chartPeriod.title}
+                </CardTitle>
+                <p className="text-muted-foreground mt-1 text-xs">{data.chartPeriod.detail}</p>
+                {data.chartPeriod.bucket === "month" && (
+                  <p className="text-muted-foreground text-xs">
+                    Monthly totals (Oslo calendar year)
+                  </p>
+                )}
+              </div>
+              <ChartPeriodToolbar
+                pathname="/dashboard"
+                mode={data.chartPeriod.mode}
+                offset={data.chartPeriod.offset}
+              />
+            </div>
           </CardHeader>
           <CardContent>
-            <StockTrendChart data={data.chartData} />
+            <StockTrendChart
+              data={data.chartData}
+              xGranularity={data.chartPeriod.bucket === "month" ? "month" : "day"}
+            />
           </CardContent>
         </Card>
 
         {/* ── Low Stock Alerts ── */}
-        <Card className="border border-border shadow-none">
+        <Card className="shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <AlertTriangle className="text-warning-foreground h-4 w-4" />
               Low Stock Alerts
               {data.lowStockItems.length > 0 && (
-                <Badge variant="destructive" className="ml-auto text-[10px]">
+                <Badge
+                  variant="secondary"
+                  className="border-warning/40 bg-warning/15 text-warning-foreground ml-auto text-[10px]"
+                >
                   {data.lowStockItems.length}
                 </Badge>
               )}
@@ -199,27 +290,29 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent className="p-0">
             {data.lowStockItems.length === 0 ? (
-              <div className="px-6 pb-6 text-center text-muted-foreground text-sm py-8">
+              <div className="text-muted-foreground px-6 py-10 pb-6 text-center text-sm">
                 All stock levels are healthy
               </div>
             ) : (
-              <div className="divide-y divide-border">
+              <div className="divide-border divide-y">
                 {data.lowStockItems.map((item) => (
-                  <div key={item.id} className="px-6 py-3 flex items-center justify-between gap-3">
+                  <div key={item.id} className="flex items-center justify-between gap-3 px-6 py-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-foreground truncate">
+                      <div className="text-foreground truncate text-sm font-medium">
                         {item.product.name}
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-muted-foreground text-xs">
                         {item.location.name} · {item.product.sku}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-sm font-semibold text-destructive">
-                        {Number(item.quantity)} left
+                    <div className="shrink-0 text-right">
+                      <div className="text-warning-foreground text-sm font-semibold">
+                        {formatQuantityNbNo(Number(item.quantity), item.product.unitSymbol)}{" "}
+                        {item.product.unitSymbol} igjen
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        min {Number(item.reorderPoint)}
+                      <div className="text-muted-foreground text-xs">
+                        min {formatQuantityNbNo(Number(item.reorderPoint), item.product.unitSymbol)}{" "}
+                        {item.product.unitSymbol}
                       </div>
                     </div>
                   </div>
@@ -231,44 +324,57 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── Recent Movements ── */}
-      <Card className="border border-border shadow-none">
+      <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">Recent Stock Movements</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {data.recentMovements.length === 0 ? (
-            <div className="px-6 pb-6 text-center text-muted-foreground text-sm py-8">
+            <div className="text-muted-foreground px-6 py-8 pb-6 text-center text-sm">
               No movements recorded yet
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/30">
+                  <tr className="border-border bg-muted/30 border-b">
                     {["Product", "Location", "Type", "Quantity", "By", "Date"].map((h) => (
-                      <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+                      <th
+                        key={h}
+                        className="text-muted-foreground whitespace-nowrap px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider"
+                      >
                         {h}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-border divide-y">
                   {data.recentMovements.map((m) => (
                     <tr key={m.id} className="hover:bg-muted/20 transition-colors">
                       <td className="px-4 py-2.5">
-                        <div className="font-medium text-foreground">{m.stock.product.name}</div>
-                        <div className="text-xs text-muted-foreground">{m.stock.product.sku}</div>
+                        <div className="text-foreground font-medium">{m.stock.product.name}</div>
+                        <div className="text-muted-foreground text-xs">{m.stock.product.sku}</div>
                       </td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{m.stock.location.name}</td>
+                      <td className="text-muted-foreground px-4 py-2.5">{m.stock.location.name}</td>
                       <td className="px-4 py-2.5">
                         <StatusBadge status={m.type} />
                       </td>
                       <td className="px-4 py-2.5 font-mono font-medium">
-                        {m.type === "OUT" ? "-" : "+"}{Number(m.quantity)}
+                        {m.type === "OUT" ? "-" : "+"}
+                        {formatQuantityNbNo(Number(m.quantity), m.stock.product.unit.symbol)}{" "}
+                        {m.stock.product.unit.symbol}
                       </td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{m.user?.name ?? "System"}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
-                        {format(m.createdAt, "d MMM, HH:mm")}
+                      <td className="text-muted-foreground px-4 py-2.5">
+                        {m.user?.name ?? "System"}
+                      </td>
+                      <td className="text-muted-foreground whitespace-nowrap px-4 py-2.5">
+                        {m.createdAt.toLocaleString("nb-NO", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          timeZone: BUSINESS_TIME_ZONE,
+                        })}
                       </td>
                     </tr>
                   ))}

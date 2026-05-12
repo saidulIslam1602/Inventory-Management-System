@@ -3,7 +3,12 @@ import { z } from "zod";
 export const purchaseOrderSchema = z.object({
   supplierId: z.string().cuid("Invalid supplier"),
   locationId: z.string().cuid("Invalid location"),
-  expectedDate: z.coerce.date().optional(),
+  expectedDate: z.preprocess((val) => {
+    if (val === undefined || val === null || val === "") return undefined;
+    if (val instanceof Date) return val;
+    if (typeof val === "string") return new Date(val);
+    return val;
+  }, z.date().optional()),
   notes: z.string().optional(),
   items: z
     .array(

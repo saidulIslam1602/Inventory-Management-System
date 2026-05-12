@@ -14,14 +14,27 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, description, actions, className }: PageHeaderProps) {
   return (
-    <div className={cn("flex items-start justify-between gap-4 mb-6", className)}>
-      <div className="min-w-0">
-        <h1 className="text-xl font-bold text-foreground tracking-tight">{title}</h1>
+    <div
+      className={cn(
+        "mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6",
+        className
+      )}
+    >
+      <div className="min-w-0 space-y-0">
+        <h1 className="text-foreground text-2xl font-semibold leading-tight tracking-tight sm:text-[1.75rem]">
+          {title}
+        </h1>
         {description && (
-          <p className="text-muted-foreground text-sm mt-0.5">{description}</p>
+          <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
+            {description}
+          </p>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && (
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { ProjectStatus } from "@prisma/client";
 
+const emptyToUndefined = (v: unknown) => (v === "" || v == null ? undefined : v);
+
 export const projectSchema = z.object({
   name: z.string().min(1, "Project name is required").max(200),
   description: z.string().optional(),
   locationId: z.string().cuid("Invalid location"),
-  startDate: z.coerce.date().optional(),
-  endDate: z.coerce.date().optional(),
+  startDate: z.preprocess(emptyToUndefined, z.coerce.date().optional()),
+  endDate: z.preprocess(emptyToUndefined, z.coerce.date().optional()),
   clientName: z.string().optional(),
   clientPhone: z.string().optional(),
 });

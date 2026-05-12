@@ -18,14 +18,14 @@ import { StockLocationSummary } from "@/components/inventory/stock-location-summ
 export const metadata: Metadata = { title: "Inventory" };
 
 async function getInventoryData() {
-  const [products, locations, stockSummary] = await Promise.all([
+  const [products, locations, stockSummary, categories, suppliers] = await Promise.all([
     // All products with their stock across all locations
     prisma.product.findMany({
       where: { isActive: true },
       include: {
         category: true,
         unit: true,
-        supplier: { select: { name: true } },
+        supplier: { select: { id: true, name: true } },
         stock: {
           include: { location: { select: { id: true, name: true } } },
         },
@@ -50,6 +50,17 @@ async function getInventoryData() {
       },
       orderBy: { name: "asc" },
     }),
+
+    prisma.category.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+
+    prisma.supplier.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
   ]);
 
   // Count low-stock per location
@@ -60,12 +71,15 @@ async function getInventoryData() {
     lowStockCount: loc.stock.filter((s) => Number(s.quantity) <= Number(s.reorderPoint)).length,
   }));
 
-  return { products, locations, locationStats };
+  const locationFilterOptions = locations.map((l) => ({ id: l.id, name: l.name }));
+
+  return { products, locations, locationStats, categories, suppliers, locationFilterOptions };
 }
 
 export default async function InventoryPage() {
   const session = await auth();
-  const { products, locations, locationStats } = await getInventoryData();
+  const { products, locations, locationStats, categories, suppliers, locationFilterOptions } =
+    await getInventoryData();
 
   const canEdit = session?.user?.role === "ADMIN" || session?.user?.role === "MANAGER";
   const lowStockTotal = locationStats.reduce((sum, loc) => sum + loc.lowStockCount, 0);
@@ -76,19 +90,31 @@ export default async function InventoryPage() {
         title="Inventory"
         description={`${products.length} products across ${locations.length} locations`}
         actions={
-          canEdit && (
-            <Button asChild size="sm">
-              <Link href="/inventory/new">
-                <Plus className="h-4 w-4 mr-1.5" />
-                Add Product
-              </Link>
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/inventory/movements">Movement log</Link>
             </Button>
-          )
+            {(session?.user?.role === "ADMIN" ||
+              session?.user?.role === "MANAGER" ||
+              session?.user?.role === "STAFF") && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/inventory/receive">Receive goods</Link>
+              </Button>
+            )}
+            {canEdit && (
+              <Button asChild size="sm">
+                <Link href="/inventory/new">
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Add Product
+                </Link>
+              </Button>
+            )}
+          </>
         }
       />
 
       {/* ── Location Stock Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {locationStats.map((loc) => (
           <StockLocationSummary key={loc.id} {...loc} />
         ))}
@@ -96,20 +122,25 @@ export default async function InventoryPage() {
 
       {/* ── Low stock alert banner ── */}
       {lowStockTotal > 0 && (
-        <div className="flex items-center gap-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
+        <div className="flex items-center gap-3 rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
           <Package className="h-4 w-4 shrink-0 text-yellow-600" />
           <span>
             <strong>{lowStockTotal} items</strong> are at or below their reorder point. Consider
             raising a purchase order.
           </span>
-          <Button variant="outline" size="sm" className="ml-auto border-yellow-300 text-yellow-800 hover:bg-yellow-100" asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto border-yellow-300 text-yellow-800 hover:bg-yellow-100"
+            asChild
+          >
             <Link href="/purchase-orders/new">Create PO</Link>
           </Button>
         </div>
       )}
 
       {/* ── Product Table ── */}
-      <Card className="border border-border shadow-none">
+      <Card className="border-border border shadow-none">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
             Products
@@ -121,7 +152,13 @@ export default async function InventoryPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 pt-0">
-          <InventoryTable products={products} canEdit={canEdit} />
+          <InventoryTable
+            products={products}
+            canEdit={canEdit}
+            categories={categories}
+            suppliers={suppliers}
+            locations={locationFilterOptions}
+          />
         </CardContent>
       </Card>
     </div>

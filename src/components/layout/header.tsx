@@ -6,7 +6,8 @@
  */
 
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
+import Link from "next/link";
+import { logout } from "@/lib/actions/auth";
 import { Bell, LogOut, ChevronRight } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
@@ -20,10 +21,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 // Map route paths to human-readable breadcrumb labels
 const PATH_LABELS: Record<string, string> = {
+  me: "My portal",
   dashboard: "Dashboard",
   inventory: "Inventory",
   "purchase-orders": "Purchase Orders",
@@ -63,23 +64,23 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
     : "??";
 
   return (
-    <header className="flex h-14 items-center gap-3 border-b border-border bg-background/95 backdrop-blur px-4 sticky top-0 z-40">
+    <header className="border-border/80 bg-background/90 supports-[backdrop-filter]:bg-background/75 sticky top-0 z-40 flex h-14 items-center gap-3 border-b px-4 backdrop-blur-md">
       {/* Sidebar toggle (mobile + collapsed desktop) */}
       <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
       <Separator orientation="vertical" className="h-5" />
 
       {/* Breadcrumb */}
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm flex-1 min-w-0">
+      <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
         {breadcrumbs.map((crumb) => (
-          <span key={crumb.href} className="flex items-center gap-1.5 min-w-0">
+          <span key={crumb.href} className="flex min-w-0 items-center gap-1.5">
             {!crumb.isLast && (
               <>
                 <span className="text-muted-foreground truncate">{crumb.label}</span>
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <ChevronRight className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
               </>
             )}
             {crumb.isLast && (
-              <span className="text-foreground font-medium truncate">{crumb.label}</span>
+              <span className="text-foreground truncate font-medium">{crumb.label}</span>
             )}
           </span>
         ))}
@@ -88,30 +89,28 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
       {/* Right actions */}
       <div className="flex items-center gap-2">
         {/* Notifications bell */}
-        <Button variant="ghost" size="icon" className="relative text-muted-foreground" aria-label="Notifications">
-          <Bell className="h-4 w-4" />
-          {notificationCount > 0 && (
-            <Badge className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 text-[10px] bg-destructive text-destructive-foreground border-background">
-              {notificationCount > 99 ? "99+" : notificationCount}
-            </Badge>
-          )}
+        <Button variant="ghost" size="icon" className="text-muted-foreground relative" asChild>
+          <Link href="/me#portal-notifications" aria-label="Open notifications on My portal">
+            <Bell className="h-4 w-4" />
+            {notificationCount > 0 && (
+              <Badge className="bg-destructive text-destructive-foreground border-background pointer-events-none absolute -right-0.5 -top-0.5 h-4 min-w-4 px-1 text-[10px]">
+                {notificationCount > 99 ? "99+" : notificationCount}
+              </Badge>
+            )}
+          </Link>
         </Button>
 
-        {/* User menu */}
+        {/* User menu — server action logout (Auth.js v5); simple trigger avoids focus/ref issues with nested Avatar */}
         <DropdownMenu>
           <DropdownMenuTrigger
-            className="inline-flex items-center justify-center rounded-full h-8 w-8 hover:bg-muted transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="bg-primary text-primary-foreground focus-visible:ring-ring inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold outline-none transition-opacity hover:opacity-90 focus-visible:ring-2"
             aria-label="User menu"
           >
-            <Avatar className="h-7 w-7">
-              <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
-                {initials}
-              </AvatarFallback>
-            </Avatar>
+            {initials}
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuContent align="end" sideOffset={6} className="w-52">
             <DropdownMenuLabel>
-              <div className="font-medium text-sm">{user.name ?? "User"}</div>
+              <div className="text-sm font-medium">{user.name ?? "User"}</div>
               <div className="text-muted-foreground text-xs font-normal">{user.email}</div>
               <Badge variant="secondary" className="mt-1 text-[10px] capitalize">
                 {user.role.toLowerCase()}
@@ -119,11 +118,14 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem
+              variant="destructive"
               className="cursor-pointer"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={() => {
+                void logout();
+              }}
             >
               <LogOut className="mr-2 h-4 w-4" />
-              Sign out
+              Log out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

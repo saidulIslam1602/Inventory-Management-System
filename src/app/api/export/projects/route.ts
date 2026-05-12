@@ -1,0 +1,99 @@
+/**
+ * CSV export for projects (authenticated).
+ */
+
+import { NextResponse } from "next/server";
+import { ProjectStatus } from "@prisma/client";
+import { format } from "date-fns";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { searchParamFirst } from "@/lib/search-params";
+import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
+import { PROJECT_STATUSES, buildProjectWhere } from "@/lib/queries/projects-list";
+
+const EXPORT_CAP = 50_000;
+
+export async function GET(req: Request) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const staffSelf =
+    session.user.role === "STAFF"
+      ? await prisma.employee.findUnique({
+          where: { userId: session.user.id },
+          select: { id: true },
+        })
+      : null;
+
+  const { searchParams } = new URL(req.url);
+  const pick = (k: string) => searchParamFirst(searchParams.get(k) ?? undefined);
+
+  const statusRaw = pick("status");
+  const status =
+    statusRaw && (PROJECT_STATUSES as readonly string[]).includes(statusRaw)
+      ? (statusRaw as ProjectStatus)
+      : undefined;
+
+  const where = buildProjectWhere({
+    status,
+    locationId: pick("location"),
+    q: pick("q"),
+    assignedToEmployeeId: staffSelf?.id,
+  });
+
+  const rows = await prisma.project.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    take: EXPORT_CAP,
+    include: {
+      location: { select: { name: true } },
+      _count: { select: { employees: true, materials: true } },
+      materials: { include: { product: { select: { unitPrice: true } } } },
+    },
+  });
+
+  const headers = [
+    "Code",
+    "Name",
+    "Status",
+    "Location",
+    "Client",
+    "Team",
+    "Materials lines",
+    "Material cost (kr)",
+    "Start",
+    "Created",
+  ];
+  const data = rows.map((p) => {
+    const materialCost = p.materials.reduce(
+      (sum, m) => sum + Number(m.usedQuantity) * Number(m.unitCostAtTime),
+      0
+    );
+    return [
+      p.projectCode,
+      p.name,
+      p.status,
+      p.location.name,
+      p.clientName ?? "",
+      p._count.employees,
+      p._count.materials,
+      materialCost,
+      p.startDate ? format(p.startDate, "yyyy-MM-dd") : "",
+      format(p.createdAt, "yyyy-MM-dd HH:mm"),
+    ];
+  });
+
+  const csv = withUtf8Bom(rowsToCsv(headers, data));
+  const truncated = rows.length >= EXPORT_CAP;
+
+  return new NextResponse(csv, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="projects-${new Date().toISOString().slice(0, 10)}.csv"`,
+      ...(truncated ? { "X-Export-Truncated": "true" } : {}),
+    },
+  });
+}

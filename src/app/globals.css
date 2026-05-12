@@ -33,6 +33,13 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  /* Semantic indicators (badges, alerts, KPI accents) */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -56,8 +63,8 @@
 
 :root {
   /* ── Aqila brand: eagle-green primary ──────────────────────────────────── */
-  --background: oklch(0.985 0.002 150);       /* very light green-white */
-  --foreground: oklch(0.18 0.01 250);         /* near-black with cool tint */
+  --background: oklch(0.985 0.002 150); /* very light green-white */
+  --foreground: oklch(0.18 0.01 250); /* near-black with cool tint */
 
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.18 0.01 250);
@@ -80,25 +87,32 @@
   /* Danger/destructive */
   --destructive: oklch(0.577 0.245 27.325);
 
+  --success: oklch(0.52 0.12 150);
+  --success-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.78 0.14 85);
+  --warning-foreground: oklch(0.32 0.08 75);
+  --info: oklch(0.52 0.1 250);
+  --info-foreground: oklch(0.99 0.02 250);
+
   --border: oklch(0.9 0.008 150);
   --input: oklch(0.92 0.006 150);
-  --ring: oklch(0.5 0.14 150);               /* matches primary */
+  --ring: oklch(0.5 0.14 150); /* matches primary */
 
   /* ── Chart palette — shades of Aqila green ───────────────────────────── */
-  --chart-1: oklch(0.5 0.14 150);            /* primary green */
-  --chart-2: oklch(0.65 0.12 150);           /* lighter green */
-  --chart-3: oklch(0.78 0.09 150);           /* pale green */
-  --chart-4: oklch(0.88 0.06 150);           /* very pale green */
-  --chart-5: oklch(0.4 0.1 200);             /* teal accent */
+  --chart-1: oklch(0.5 0.14 150); /* primary green */
+  --chart-2: oklch(0.65 0.12 150); /* lighter green */
+  --chart-3: oklch(0.78 0.09 150); /* pale green */
+  --chart-4: oklch(0.88 0.06 150); /* very pale green */
+  --chart-5: oklch(0.4 0.1 200); /* teal accent */
 
   --radius: 0.5rem;
 
   /* ── Sidebar — dark navy surface, matches Aqila dark identity ─────────── */
-  --sidebar: oklch(0.16 0.015 250);          /* #0F172A equivalent */
+  --sidebar: oklch(0.16 0.015 250); /* #0F172A equivalent */
   --sidebar-foreground: oklch(0.92 0.005 150);
-  --sidebar-primary: oklch(0.5 0.14 150);    /* green highlight */
+  --sidebar-primary: oklch(0.5 0.14 150); /* green highlight */
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.22 0.015 250);   /* hover state */
+  --sidebar-accent: oklch(0.22 0.015 250); /* hover state */
   --sidebar-accent-foreground: oklch(0.92 0.005 150);
   --sidebar-border: oklch(0.25 0.015 250);
   --sidebar-ring: oklch(0.5 0.14 150);
@@ -113,7 +127,7 @@
   --popover: oklch(0.18 0.012 250);
   --popover-foreground: oklch(0.95 0.005 150);
 
-  --primary: oklch(0.6 0.14 150);            /* lighter green in dark mode */
+  --primary: oklch(0.6 0.14 150); /* lighter green in dark mode */
   --primary-foreground: oklch(0.1 0.01 250);
 
   --secondary: oklch(0.22 0.015 250);
@@ -126,6 +140,13 @@
   --accent-foreground: oklch(0.95 0.005 150);
 
   --destructive: oklch(0.704 0.191 22.216);
+
+  --success: oklch(0.62 0.13 150);
+  --success-foreground: oklch(0.12 0.02 150);
+  --warning: oklch(0.72 0.12 85);
+  --warning-foreground: oklch(0.18 0.04 75);
+  --info: oklch(0.65 0.1 250);
+  --info-foreground: oklch(0.12 0.02 250);
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 12%);
@@ -152,13 +173,14 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    text-rendering: optimizeLegibility;
   }
   html {
     @apply font-sans;
   }
   /* Smooth focus rings for accessibility */
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-ring;
+    @apply outline-ring outline-2 outline-offset-2;
   }
 }

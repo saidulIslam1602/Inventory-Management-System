@@ -1,5 +1,5 @@
 /**
- * Next.js middleware — route protection and RBAC.
+ * Next.js 16+ request proxy (formerly `middleware.ts`) — route protection and RBAC.
  *
  * All /dashboard routes require authentication.
  * Role-based access is enforced per route group:
@@ -9,17 +9,29 @@
  * Unauthenticated users are redirected to /login.
  */
 
-import { auth } from "@/lib/auth";
+import NextAuth from "next-auth";
+import authConfig from "@/lib/auth.config";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+/** Keep this file free of Prisma/bcrypt — Node-only modules break the Edge bundle. */
+const { auth: withAuth } = NextAuth(authConfig);
+
 // Routes that require authentication
-const PROTECTED_PREFIXES = ["/dashboard", "/inventory", "/purchase-orders", "/employees", "/projects", "/reports", "/settings"];
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/inventory",
+  "/purchase-orders",
+  "/employees",
+  "/projects",
+  "/reports",
+  "/settings",
+];
 
 // Routes restricted to ADMIN role only
 const ADMIN_ONLY_PREFIXES = ["/settings/users"];
 
-export default auth((req: NextRequest & { auth: { user?: { role?: string } } | null }) => {
+export default withAuth((req: NextRequest & { auth: { user?: { role?: string } } | null }) => {
   const { pathname } = req.nextUrl;
 
   // Check if the route needs protection
@@ -43,6 +55,6 @@ export default auth((req: NextRequest & { auth: { user?: { role?: string } } | n
 });
 
 export const config = {
-  // Run middleware on all routes except static assets and API routes that handle auth themselves
+  // Run on all routes except static assets and API routes that handle auth themselves
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };

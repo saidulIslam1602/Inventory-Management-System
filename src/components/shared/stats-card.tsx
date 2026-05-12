@@ -19,16 +19,16 @@ interface StatsCardProps {
 
 const VARIANT_STYLES = {
   default: "text-primary",
-  warning: "text-yellow-600",
+  warning: "text-warning-foreground",
   danger: "text-destructive",
-  success: "text-primary",
+  success: "text-success",
 };
 
 const VARIANT_BG = {
   default: "bg-primary/10",
-  warning: "bg-yellow-50",
+  warning: "bg-warning/18",
   danger: "bg-destructive/10",
-  success: "bg-primary/10",
+  success: "bg-success/15",
 };
 
 export function StatsCard({
@@ -43,36 +43,32 @@ export function StatsCard({
   const colorClass = VARIANT_STYLES[variant];
   const bgClass = VARIANT_BG[variant];
 
-  const TrendIcon =
-    trend
-      ? trend.value > 0
-        ? TrendingUp
-        : trend.value < 0
-          ? TrendingDown
-          : Minus
-      : null;
+  const TrendIcon = trend
+    ? trend.value > 0
+      ? TrendingUp
+      : trend.value < 0
+        ? TrendingDown
+        : Minus
+    : null;
 
-  const trendColor =
-    trend
-      ? trend.value > 0
-        ? "text-primary"
-        : trend.value < 0
-          ? "text-destructive"
-          : "text-muted-foreground"
-      : "";
+  const trendColor = trend
+    ? trend.value > 0
+      ? "text-success"
+      : trend.value < 0
+        ? "text-destructive"
+        : "text-muted-foreground"
+    : "";
 
   return (
-    <Card className={cn("border border-border shadow-none", className)}>
-      <CardContent className="p-5">
+    <Card className={cn("shadow-sm", className)}>
+      <CardContent className="p-5 sm:p-6">
         <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <p className="text-muted-foreground text-sm font-medium truncate">{title}</p>
-            <p className="text-2xl font-bold text-foreground mt-1 leading-none">{value}</p>
-            {description && (
-              <p className="text-muted-foreground text-xs mt-1.5">{description}</p>
-            )}
+          <div className="min-w-0 flex-1">
+            <p className="text-muted-foreground truncate text-sm font-medium">{title}</p>
+            <p className="text-foreground mt-1 text-2xl font-bold leading-none">{value}</p>
+            {description && <p className="text-muted-foreground mt-1.5 text-xs">{description}</p>}
             {trend && TrendIcon && (
-              <div className={cn("flex items-center gap-1 mt-2 text-xs", trendColor)}>
+              <div className={cn("mt-2 flex items-center gap-1 text-xs", trendColor)}>
                 <TrendIcon className="h-3 w-3" />
                 <span>
                   {Math.abs(trend.value)}% {trend.label}
@@ -80,7 +76,12 @@ export function StatsCard({
               </div>
             )}
           </div>
-          <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ml-4", bgClass)}>
+          <div
+            className={cn(
+              "ml-4 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+              bgClass
+            )}
+          >
             <Icon className={cn("h-5 w-5", colorClass)} />
           </div>
         </div>

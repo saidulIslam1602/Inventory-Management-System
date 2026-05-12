@@ -45,13 +45,14 @@ export async function createProject(formData: unknown): Promise<ActionResult<{ i
   try {
     const project = await prisma.project.create({
       data: {
-        ...parsed.data,
-        projectCode: await generateProjectCode(),
+        name: parsed.data.name,
+        locationId: parsed.data.locationId,
         startDate: parsed.data.startDate ?? null,
         endDate: parsed.data.endDate ?? null,
-        description: parsed.data.description ?? null,
-        clientName: parsed.data.clientName ?? null,
-        clientPhone: parsed.data.clientPhone ?? null,
+        description: parsed.data.description?.trim() || null,
+        clientName: parsed.data.clientName?.trim() || null,
+        clientPhone: parsed.data.clientPhone?.trim() || null,
+        projectCode: await generateProjectCode(),
       },
     });
 
@@ -111,7 +112,8 @@ export async function reserveMaterial(formData: unknown): Promise<ActionResult> 
       where: { productId, locationId: project.locationId },
     });
 
-    if (!stock) return { success: false, error: "No stock found for this product at the project location" };
+    if (!stock)
+      return { success: false, error: "No stock found for this product at the project location" };
 
     const availableQty = Number(stock.quantity) - Number(stock.reserved);
     if (availableQty < reservedQuantity) {
@@ -195,7 +197,10 @@ export async function consumeMaterial(formData: unknown): Promise<ActionResult> 
 
     const remaining = Number(pm.reservedQuantity) - Number(pm.usedQuantity);
     if (usedQuantity > remaining) {
-      return { success: false, error: `Cannot consume more than reserved (${remaining} remaining)` };
+      return {
+        success: false,
+        error: `Cannot consume more than reserved (${remaining} remaining)`,
+      };
     }
 
     const stock = await prisma.stock.findFirst({

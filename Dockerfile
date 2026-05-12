@@ -53,16 +53,25 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy Prisma files needed for migrations at runtime
+# Copy Prisma files needed at runtime
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
+# Standalone trace omits the Prisma CLI tree; install CLI in an isolated prefix (many transitive deps).
+RUN mkdir -p /tmp/prisma-install && cd /tmp/prisma-install && \
+  printf '%s\n' '{"name":"prisma-tools","private":true}' > package.json && \
+  npm install prisma@7.8.0 --omit=dev --ignore-scripts --no-audit && \
+  mkdir -p /prisma-tools && mv node_modules /prisma-tools/ && rm -rf /tmp/prisma-install && \
+  chown -R nextjs:nodejs /prisma-tools
+
+RUN apk add --no-cache wget
+
 # Copy the entrypoint script
 COPY docker/entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh
-
-USER nextjs
+RUN chmod +x ./entrypoint.sh && \
+    chown -R nextjs:nodejs /app/prisma /app/prisma.config.ts /app/node_modules/.prisma /app/node_modules/@prisma ./entrypoint.sh
 
 EXPOSE 3000
 ENV PORT=3000

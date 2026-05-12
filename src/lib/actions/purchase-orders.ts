@@ -25,7 +25,9 @@ async function generatePONumber(): Promise<string> {
 
 // ── Create PO ─────────────────────────────────────────────────────────────────
 
-export async function createPurchaseOrder(formData: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createPurchaseOrder(
+  formData: unknown
+): Promise<ActionResult<{ id: string }>> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
     return { success: false, error: "Insufficient permissions" };
@@ -39,8 +41,11 @@ export async function createPurchaseOrder(formData: unknown): Promise<ActionResu
   try {
     const { supplierId, locationId, expectedDate, notes, items } = parsed.data;
 
-    // Calculate total from line items
-    const totalAmount = items.reduce((sum, item) => sum + item.orderedQuantity * item.unitPrice, 0);
+    // Calculate total from line items (2 dp NOK to avoid binary float dust)
+    const totalAmount =
+      Math.round(
+        items.reduce((sum, item) => sum + item.orderedQuantity * item.unitPrice, 0) * 100
+      ) / 100;
 
     const po = await prisma.purchaseOrder.create({
       data: {
@@ -80,12 +85,17 @@ export async function advancePOStatus(
   const po = await prisma.purchaseOrder.findUnique({ where: { id: poId } });
   if (!po) return { success: false, error: "Purchase order not found" };
 
-  const STATUS_TRANSITIONS: Record<string, { from: string[]; to: string; requiredRole: string[] }> = {
-    submit: { from: ["DRAFT"], to: "SUBMITTED", requiredRole: ["ADMIN", "MANAGER", "STAFF"] },
-    approve: { from: ["SUBMITTED"], to: "APPROVED", requiredRole: ["ADMIN", "MANAGER"] },
-    order: { from: ["APPROVED"], to: "ORDERED", requiredRole: ["ADMIN", "MANAGER"] },
-    cancel: { from: ["DRAFT", "SUBMITTED", "APPROVED"], to: "CANCELLED", requiredRole: ["ADMIN", "MANAGER"] },
-  };
+  const STATUS_TRANSITIONS: Record<string, { from: string[]; to: string; requiredRole: string[] }> =
+    {
+      submit: { from: ["DRAFT"], to: "SUBMITTED", requiredRole: ["ADMIN", "MANAGER", "STAFF"] },
+      approve: { from: ["SUBMITTED"], to: "APPROVED", requiredRole: ["ADMIN", "MANAGER"] },
+      order: { from: ["APPROVED"], to: "ORDERED", requiredRole: ["ADMIN", "MANAGER"] },
+      cancel: {
+        from: ["DRAFT", "SUBMITTED", "APPROVED"],
+        to: "CANCELLED",
+        requiredRole: ["ADMIN", "MANAGER"],
+      },
+    };
 
   const transition = STATUS_TRANSITIONS[action];
   if (!transition.requiredRole.includes(session.user.role)) {
@@ -133,6 +143,22 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
       return { success: false, error: "PO must be in ORDERED or PARTIALLY_RECEIVED status" };
     }
 
+    for (const receiveItem of items) {
+      if (receiveItem.receivedQuantity <= 0) continue;
+      const poItem = po.items.find((i) => i.id === receiveItem.itemId);
+      if (!poItem) {
+        return { success: false, error: `Unknown purchase order line: ${receiveItem.itemId}` };
+      }
+      const nextReceived = Number(poItem.receivedQuantity) + receiveItem.receivedQuantity;
+      const ordered = Number(poItem.orderedQuantity);
+      if (nextReceived > ordered + 1e-9) {
+        return {
+          success: false,
+          error: `Cannot receive more than ordered for ${poItem.product?.sku ?? "line"}: ${nextReceived} > ${ordered}`,
+        };
+      }
+    }
+
     await prisma.$transaction(async (tx) => {
       for (const receiveItem of items) {
         if (receiveItem.receivedQuantity <= 0) continue;
@@ -168,6 +194,7 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
             stockId: stock.id,
             type: "IN",
             quantity: receiveItem.receivedQuantity,
+            unitCost: Number(poItem.unitPrice),
             note: `Received from PO ${po.poNumber}`,
             toLocationId: po.locationId,
             userId: session.user.id,

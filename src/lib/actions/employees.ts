@@ -1,210 +1,165 @@
 "use server";
 
-/**
- * Employee Server Actions.
- * Handles creating employees (with linked User), recording attendance, scheduling shifts.
- */
-
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
+import { UserRole } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { employeeSchema, attendanceSchema, shiftSchema } from "@/lib/validations/employee";
+import { createEmployeeSchema, updateEmployeeSchema } from "@/lib/validations/employee";
 import type { ActionResult } from "@/types";
-import type { UserRole } from "@prisma/client";
 
-// ── Generate employee code ────────────────────────────────────────────────────
-
-async function generateEmployeeCode(): Promise<string> {
-  const count = await prisma.employee.count();
-  return `AQ-${String(count + 1).padStart(4, "0")}`;
+function canManageEmployees(role: string | undefined) {
+  return role === "ADMIN" || role === "MANAGER";
 }
 
-// ── Create Employee ───────────────────────────────────────────────────────────
+/** Managers may not assign the ADMIN role */
+function assertRoleAllowed(actorRole: string, targetRole: UserRole) {
+  if (actorRole === "MANAGER" && targetRole === UserRole.ADMIN) {
+    return { ok: false as const, error: "Only an administrator can assign the Admin role." };
+  }
+  return { ok: true as const };
+}
+
+async function nextEmployeeCode(): Promise<string> {
+  const rows = await prisma.employee.findMany({
+    select: { employeeCode: true },
+  });
+  let max = 0;
+  for (const r of rows) {
+    const m = /^AQ-(\d+)$/i.exec(r.employeeCode);
+    if (m) max = Math.max(max, parseInt(m[1]!, 10));
+  }
+  return `AQ-${String(max + 1).padStart(4, "0")}`;
+}
 
 export async function createEmployee(formData: unknown): Promise<ActionResult<{ id: string }>> {
   const session = await auth();
-  if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
+  if (!canManageEmployees(session?.user?.role)) {
     return { success: false, error: "Insufficient permissions" };
   }
 
-  const parsed = employeeSchema.safeParse(formData);
+  const parsed = createEmployeeSchema.safeParse(formData);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
   }
 
-  const { email, firstName, lastName, phone, address, hireDate, locationId, departmentId, role } =
-    parsed.data;
+  const perm = assertRoleAllowed(session!.user!.role, parsed.data.role);
+  if (!perm.ok) return { success: false, error: perm.error };
+
+  const employeeCode = parsed.data.employeeCode ?? (await nextEmployeeCode());
+
+  const existingCode = await prisma.employee.findUnique({ where: { employeeCode } });
+  if (existingCode) return { success: false, error: "Employee code already in use" };
+
+  const existingEmail = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+  if (existingEmail) return { success: false, error: "A user with this email already exists" };
 
   try {
-    // Check email uniqueness
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return { success: false, error: "A user with this email already exists" };
-
-    // Create user account with a temporary password (they should reset it)
-    const temporaryPassword = await bcrypt.hash("ChangeMe123!", 12);
+    const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+    const fullName = `${parsed.data.firstName} ${parsed.data.lastName}`.trim();
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
-          email,
-          name: `${firstName} ${lastName}`,
-          passwordHash: temporaryPassword,
-          role: role as UserRole,
+          name: fullName,
+          email: parsed.data.email,
+          passwordHash,
+          role: parsed.data.role,
         },
       });
 
       const employee = await tx.employee.create({
         data: {
-          employeeCode: await generateEmployeeCode(),
-          firstName,
-          lastName,
-          phone: phone ?? null,
-          address: address ?? null,
-          hireDate,
+          employeeCode,
+          firstName: parsed.data.firstName,
+          lastName: parsed.data.lastName,
+          hireDate: parsed.data.hireDate,
+          phone: parsed.data.phone ?? null,
+          address: parsed.data.address ?? null,
+          photoUrl: parsed.data.photoUrl ?? null,
+          isActive: parsed.data.isActive ?? true,
           userId: user.id,
-          locationId,
-          departmentId: departmentId ?? null,
+          locationId: parsed.data.locationId,
+          departmentId: parsed.data.departmentId ?? null,
         },
       });
-
       return employee;
     });
 
     revalidatePath("/employees");
-    return { success: true, data: { id: result.id }, message: `${firstName} ${lastName} added. Temporary password: ChangeMe123!` };
+    return { success: true, data: { id: result.id }, message: "Employee created" };
   } catch {
     return { success: false, error: "Failed to create employee" };
   }
 }
 
-// ── Update Employee ───────────────────────────────────────────────────────────
-
-export async function updateEmployee(id: string, formData: unknown): Promise<ActionResult> {
+export async function updateEmployee(formData: unknown): Promise<ActionResult> {
   const session = await auth();
-  if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
+  if (!canManageEmployees(session?.user?.role)) {
     return { success: false, error: "Insufficient permissions" };
   }
 
-  const parsed = employeeSchema.safeParse(formData);
+  const parsed = updateEmployeeSchema.safeParse(formData);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
   }
 
-  const { firstName, lastName, phone, address, hireDate, locationId, departmentId, role } =
-    parsed.data;
+  const perm = assertRoleAllowed(session!.user!.role, parsed.data.role);
+  if (!perm.ok) return { success: false, error: perm.error };
+
+  const emp = await prisma.employee.findUnique({
+    where: { id: parsed.data.employeeId },
+    include: { user: true },
+  });
+  if (!emp) return { success: false, error: "Employee not found" };
+
+  const codeOwner = await prisma.employee.findFirst({
+    where: { employeeCode: parsed.data.employeeCode, NOT: { id: emp.id } },
+  });
+  if (codeOwner) return { success: false, error: "Employee code already in use" };
+
+  if (parsed.data.email !== emp.user.email) {
+    const emailTaken = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+    if (emailTaken) return { success: false, error: "A user with this email already exists" };
+  }
 
   try {
-    const employee = await prisma.employee.findUnique({
-      where: { id },
-      include: { user: true },
-    });
-    if (!employee) return { success: false, error: "Employee not found" };
+    const fullName = `${parsed.data.firstName} ${parsed.data.lastName}`.trim();
+    const passwordHash =
+      parsed.data.newPassword != null ? await bcrypt.hash(parsed.data.newPassword, 12) : undefined;
 
-    await prisma.$transaction([
-      prisma.employee.update({
-        where: { id },
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: emp.userId },
         data: {
-          firstName,
-          lastName,
-          phone: phone ?? null,
-          address: address ?? null,
-          hireDate,
-          locationId,
-          departmentId: departmentId ?? null,
+          name: fullName,
+          email: parsed.data.email,
+          role: parsed.data.role,
+          ...(passwordHash ? { passwordHash } : {}),
         },
-      }),
-      prisma.user.update({
-        where: { id: employee.userId },
+      });
+
+      await tx.employee.update({
+        where: { id: emp.id },
         data: {
-          name: `${firstName} ${lastName}`,
-          role: role as UserRole,
+          employeeCode: parsed.data.employeeCode,
+          firstName: parsed.data.firstName,
+          lastName: parsed.data.lastName,
+          hireDate: parsed.data.hireDate,
+          phone: parsed.data.phone ?? null,
+          address: parsed.data.address ?? null,
+          photoUrl: parsed.data.photoUrl ?? null,
+          isActive: parsed.data.isActive,
+          locationId: parsed.data.locationId,
+          departmentId: parsed.data.departmentId ?? null,
         },
-      }),
-    ]);
+      });
+    });
 
     revalidatePath("/employees");
+    revalidatePath(`/employees/${emp.id}`);
     return { success: true, data: undefined, message: "Employee updated" };
   } catch {
     return { success: false, error: "Failed to update employee" };
-  }
-}
-
-// ── Toggle Employee Active State ──────────────────────────────────────────────
-
-export async function toggleEmployeeActive(id: string, isActive: boolean): Promise<ActionResult> {
-  const session = await auth();
-  if (!session?.user || session.user.role !== "ADMIN") {
-    return { success: false, error: "Admin only" };
-  }
-
-  try {
-    const employee = await prisma.employee.findUnique({ where: { id } });
-    if (!employee) return { success: false, error: "Employee not found" };
-
-    await prisma.$transaction([
-      prisma.employee.update({ where: { id }, data: { isActive } }),
-      prisma.user.update({ where: { id: employee.userId }, data: { isActive } }),
-    ]);
-
-    revalidatePath("/employees");
-    return { success: true, data: undefined };
-  } catch {
-    return { success: false, error: "Failed to update employee" };
-  }
-}
-
-// ── Record Attendance ─────────────────────────────────────────────────────────
-
-export async function recordAttendance(formData: unknown): Promise<ActionResult> {
-  const session = await auth();
-  if (!session?.user) return { success: false, error: "Not authenticated" };
-
-  const parsed = attendanceSchema.safeParse(formData);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
-  }
-
-  const { employeeId, date, status, checkIn, checkOut, notes } = parsed.data;
-
-  try {
-    // Calculate hours worked if both check-in and check-out are provided
-    let hoursWorked: number | null = null;
-    if (checkIn && checkOut) {
-      hoursWorked = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
-    }
-
-    await prisma.attendance.upsert({
-      where: { employeeId_date: { employeeId, date } },
-      update: { status, checkIn: checkIn ?? null, checkOut: checkOut ?? null, notes: notes ?? null, hoursWorked },
-      create: { employeeId, date, status, checkIn: checkIn ?? null, checkOut: checkOut ?? null, notes: notes ?? null, hoursWorked },
-    });
-
-    revalidatePath("/employees");
-    return { success: true, data: undefined, message: "Attendance recorded" };
-  } catch {
-    return { success: false, error: "Failed to record attendance" };
-  }
-}
-
-// ── Create Shift ──────────────────────────────────────────────────────────────
-
-export async function createShift(formData: unknown): Promise<ActionResult> {
-  const session = await auth();
-  if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
-  }
-
-  const parsed = shiftSchema.safeParse(formData);
-  if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
-  }
-
-  try {
-    await prisma.shift.create({ data: parsed.data });
-    revalidatePath("/employees");
-    return { success: true, data: undefined, message: "Shift scheduled" };
-  } catch {
-    return { success: false, error: "Failed to create shift" };
   }
 }

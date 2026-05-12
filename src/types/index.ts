@@ -3,10 +3,26 @@
  * Re-exports Prisma enums and defines shared UI/API types.
  */
 
-import type { UserRole, LocationType, MovementType, POStatus, ProjectStatus, AttendanceStatus, NotificationType } from "@prisma/client";
+import type {
+  UserRole,
+  LocationType,
+  MovementType,
+  POStatus,
+  ProjectStatus,
+  AttendanceStatus,
+  NotificationType,
+} from "@prisma/client";
 
 // Re-export Prisma enums for use throughout the app
-export type { UserRole, LocationType, MovementType, POStatus, ProjectStatus, AttendanceStatus, NotificationType };
+export type {
+  UserRole,
+  LocationType,
+  MovementType,
+  POStatus,
+  ProjectStatus,
+  AttendanceStatus,
+  NotificationType,
+};
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
@@ -71,6 +87,13 @@ declare module "next-auth" {
 
 declare module "@auth/core/adapters" {
   interface AdapterUser {
+    role: UserRole;
+  }
+}
+
+declare module "@auth/core/jwt" {
+  interface JWT {
+    id: string;
     role: UserRole;
   }
 }

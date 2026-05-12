@@ -214,8 +214,8 @@ model Category {
 /// Unit of measure (pcs, m, kg, box, etc.)
 model Unit {
   id        String   @id @default(cuid())
-  name      String   @unique  // "pcs", "metres", "kg"
-  symbol    String   @unique  // "stk", "m", "kg"
+  name      String   @unique  // e.g. "Stykk", "Meter" (NO: handelsenheter)
+  symbol    String   @unique  // NOBBS-lignende: stk, m, kg, esk, rull, sett
   createdAt DateTime @default(now())
 
   products Product[]
@@ -227,6 +227,10 @@ model Unit {
 model Product {
   id          String   @id @default(cuid())
   sku         String   @unique
+  /// EAN/UPC or internal barcode — scanned at goods-in; keyboard-wedge scanners type here.
+  barcode          String?  @unique
+  /// Default purchase cost per unit (NOK) — pre-filled on receive; actual cost stored on each IN movement.
+  purchaseUnitCost Decimal? @db.Decimal(12, 2)
   name        String
   description String?
   imageUrl    String?
@@ -280,6 +284,8 @@ model StockMovement {
   id        String       @id @default(cuid())
   type      MovementType
   quantity  Decimal      @db.Decimal(12, 3)
+  /// Purchase cost per unit (NOK) at goods-in — set for IN (incl. PO receive, manual receive); null for other types.
+  unitCost  Decimal?     @db.Decimal(12, 2)
   note      String?      // Reason for adjustment, PO reference, etc.
   createdAt DateTime     @default(now())
 

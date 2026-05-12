@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * StockTrendChart — Recharts area chart showing daily IN/OUT movements.
- * Used on the dashboard to visualise stock flow over 30 days.
+ * StockTrendChart — Recharts area chart showing IN/OUT movements by Oslo calendar day or month.
  */
 
 import {
@@ -24,12 +23,14 @@ interface ChartDataPoint {
 
 interface StockTrendChartProps {
   data: ChartDataPoint[];
+  /** Bucketing of the X axis labels (year view = one point per calendar month). */
+  xGranularity?: "day" | "month";
 }
 
-export function StockTrendChart({ data }: StockTrendChartProps) {
+export function StockTrendChart({ data, xGranularity = "day" }: StockTrendChartProps) {
   if (data.length === 0) {
     return (
-      <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">
+      <div className="text-muted-foreground flex h-[220px] items-center justify-center text-sm">
         No movement data available yet
       </div>
     );
@@ -53,10 +54,16 @@ export function StockTrendChart({ data }: StockTrendChartProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
           <XAxis
             dataKey="date"
-            tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+            tick={{
+              fontSize: 11,
+              fill: "hsl(var(--muted-foreground))",
+              angle: xGranularity === "month" ? -35 : 0,
+              textAnchor: xGranularity === "month" ? "end" : "middle",
+            }}
+            height={xGranularity === "month" ? 48 : 28}
             axisLine={false}
             tickLine={false}
-            interval="preserveStartEnd"
+            interval={xGranularity === "month" ? 0 : "preserveStartEnd"}
           />
           <YAxis
             tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}

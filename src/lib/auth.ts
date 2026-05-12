@@ -2,21 +2,19 @@
  * Auth.js v5 (NextAuth) configuration.
  *
  * - Provider: credentials (email + bcrypt password)
- * - Adapter: Prisma (sessions stored in DB)
- * - Session: database strategy (server-side, revocable)
- * - RBAC: user role is embedded in the session and JWT for fast access
+ * - Session: JWT (Edge-compatible proxy; avoids Prisma/TCP on Edge)
+ * - RBAC: role is copied into the JWT and session in `auth.config.ts`
  */
 
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
+import authConfig from "@/lib/auth.config";
 import { prisma } from "@/lib/db";
 import { loginSchema } from "@/lib/validations/auth";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  session: { strategy: "database" },
+  ...authConfig,
 
   providers: [
     Credentials({
@@ -60,21 +58,4 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
   ],
-
-  callbacks: {
-    // Attach role to the session so it is available in middleware and components
-    async session({ session, user }) {
-      if (session.user && user) {
-        session.user.id = user.id;
-        // UserRole from Prisma is a string enum — safe cast
-        session.user.role = (user as { role: import("@prisma/client").UserRole }).role;
-      }
-      return session;
-    },
-  },
-
-  pages: {
-    signIn: "/login",
-    error: "/login",
-  },
 });
