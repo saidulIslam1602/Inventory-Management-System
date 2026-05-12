@@ -1,0 +1,75 @@
+version: "3.9"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Aqila IMS — Docker Compose (local development + production)
+#
+# Services:
+#   app      — Next.js application
+#   db       — PostgreSQL 16
+#   adminer  — Lightweight DB admin UI (dev only)
+#
+# Usage:
+#   Development: docker compose up
+#   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL database ────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: aqila_ims_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aqila_ims
+      POSTGRES_USER: aqila_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aqila_dev_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aqila_user -d aqila_ims"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Next.js application ────────────────────────────────────────────────────
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: aqila_ims_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://aqila_user:${POSTGRES_PASSWORD:-aqila_dev_secret}@db:5432/aqila_ims"
+      AUTH_SECRET: ${AUTH_SECRET:-dev_auth_secret_change_in_production}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── Adminer (DB admin UI — disable in production) ──────────────────────────
+  adminer:
+    image: adminer:latest
+    container_name: aqila_ims_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    profiles:
+      - dev  # Only starts when: docker compose --profile dev up
+
+volumes:
+  postgres_data:
+    name: aqila_ims_postgres_data

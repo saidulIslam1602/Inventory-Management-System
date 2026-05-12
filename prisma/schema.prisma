@@ -1,0 +1,524 @@
+// ──────────────────────────────────────────────────────────────────────────────
+// Aqila IMS — Prisma Schema
+// PostgreSQL 16 | Prisma ORM
+//
+// Entity overview:
+//   User / Session / Account  — Auth.js v5 tables
+//   Location                  — Aqila's 4 branches + virtual "Van" locations
+//   Category / Unit           — Product taxonomy
+//   Product                   — Catalog of goods Aqila stocks
+//   Stock                     — Quantity of a Product at a Location
+//   StockMovement             — Immutable audit log of every stock change
+//   Supplier                  — Vendors Aqila buys from
+//   PurchaseOrder / Item      — Procurement lifecycle
+//   Department                — Org units (e.g. Elektro, Alarm, Automasjon)
+//   Employee                  — Staff linked to a User account
+//   Attendance                — Daily check-in / check-out records
+//   Shift                     — Scheduled shifts
+//   Project                   — Work orders / installation jobs
+//   ProjectMaterial           — Materials reserved/consumed per project
+//   Notification              — DB-stored alert queue (low-stock, PO events)
+// ──────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// In Prisma v7, the connection URL is configured in prisma.config.ts (not here).
+// See: https://pris.ly/d/config-datasource
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN          // Full system access
+  MANAGER        // Approve POs, manage employees and inventory
+  STAFF          // Create movements, check attendance
+  VIEWER         // Read-only dashboard access
+}
+
+enum LocationType {
+  BRANCH         // Fixed office/warehouse (Svolvær, Gravdal, Røst, Ramberg)
+  VAN            // Mobile service vehicle
+  EXTERNAL       // Client site or temporary storage
+}
+
+enum MovementType {
+  IN             // Goods received (from PO or manual)
+  OUT            // Goods consumed or removed
+  TRANSFER       // Moved between locations
+  ADJUSTMENT     // Manual stock correction with audit note
+  RESERVED       // Soft-reservation for a project
+  RELEASED       // Reservation cancelled
+}
+
+enum POStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum ProjectStatus {
+  PLANNING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  LEAVE
+}
+
+enum NotificationType {
+  LOW_STOCK
+  PO_APPROVED
+  PO_RECEIVED
+  PROJECT_STARTED
+  PROJECT_COMPLETED
+  SYSTEM
+}
+
+// ─────────────────────────────────────────────
+// AUTH (Auth.js v5 / NextAuth required tables)
+// ─────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?   // Hashed with bcryptjs for credentials provider
+  role          UserRole  @default(VIEWER)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  employee      Employee?
+  stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
+  notifications  Notification[]
+
+  @@map("users")
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─────────────────────────────────────────────
+// ORGANISATION STRUCTURE
+// ─────────────────────────────────────────────
+
+/// A physical branch or virtual location (van, external site)
+model Location {
+  id          String       @id @default(cuid())
+  name        String       @unique  // "Svolvær", "Gravdal", "Røst", "Ramberg"
+  type        LocationType @default(BRANCH)
+  address     String?
+  phone       String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  stock           Stock[]
+  employees       Employee[]
+  purchaseOrders  PurchaseOrder[]
+  projects        Project[]
+  fromMovements   StockMovement[] @relation("MovementFrom")
+  toMovements     StockMovement[] @relation("MovementTo")
+
+  @@map("locations")
+}
+
+/// Organisational departments (Elektro, Alarm, Automasjon, Svakstrøm, etc.)
+model Department {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  createdAt DateTime   @default(now())
+
+  employees Employee[]
+
+  @@map("departments")
+}
+
+// ─────────────────────────────────────────────
+// PRODUCT CATALOG
+// ─────────────────────────────────────────────
+
+/// Product categories (Cables, Switches, Heat Pumps, Tools, etc.)
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+
+  products Product[]
+
+  @@map("categories")
+}
+
+/// Unit of measure (pcs, m, kg, box, etc.)
+model Unit {
+  id        String   @id @default(cuid())
+  name      String   @unique  // "pcs", "metres", "kg"
+  symbol    String   @unique  // "stk", "m", "kg"
+  createdAt DateTime @default(now())
+
+  products Product[]
+
+  @@map("units")
+}
+
+/// A product or material Aqila stocks and uses
+model Product {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  description String?
+  imageUrl    String?
+  unitPrice   Decimal  @db.Decimal(12, 2) @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  unitId     String
+  unit       Unit     @relation(fields: [unitId], references: [id])
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  stock            Stock[]
+  purchaseOrderItems PurchaseOrderItem[]
+  projectMaterials  ProjectMaterial[]
+
+  @@map("products")
+}
+
+// ─────────────────────────────────────────────
+// INVENTORY & STOCK
+// ─────────────────────────────────────────────
+
+/// Current stock level of a Product at a Location
+model Stock {
+  id           String   @id @default(cuid())
+  quantity     Decimal  @db.Decimal(12, 3) @default(0)
+  reserved     Decimal  @db.Decimal(12, 3) @default(0)  // soft-reserved for projects
+  reorderPoint Decimal  @db.Decimal(12, 3) @default(0)  // triggers low-stock alert
+  updatedAt    DateTime @updatedAt
+
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  movements StockMovement[]
+
+  @@unique([productId, locationId])
+  @@map("stock")
+}
+
+/// Immutable audit record of every stock change
+model StockMovement {
+  id        String       @id @default(cuid())
+  type      MovementType
+  quantity  Decimal      @db.Decimal(12, 3)
+  note      String?      // Reason for adjustment, PO reference, etc.
+  createdAt DateTime     @default(now())
+
+  stockId   String
+  stock     Stock  @relation(fields: [stockId], references: [id])
+
+  // For TRANSFER movements: source and destination
+  fromLocationId String?
+  fromLocation   Location? @relation("MovementFrom", fields: [fromLocationId], references: [id])
+
+  toLocationId   String?
+  toLocation     Location? @relation("MovementTo", fields: [toLocationId], references: [id])
+
+  // Who performed the movement
+  userId String?
+  user   User?  @relation(fields: [userId], references: [id])
+
+  // Optional link to a purchase order receiving event
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+
+  // Optional link to a project consumption event
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+
+  @@map("stock_movements")
+}
+
+// ─────────────────────────────────────────────
+// PROCUREMENT
+// ─────────────────────────────────────────────
+
+/// Vendor / supplier master data
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+/// A purchase order from Aqila to a supplier
+model PurchaseOrder {
+  id             String   @id @default(cuid())
+  poNumber       String   @unique  // Auto-generated: PO-2026-0001
+  status         POStatus @default(DRAFT)
+  expectedDate   DateTime?
+  receivedAt     DateTime?
+  totalAmount    Decimal  @db.Decimal(14, 2) @default(0)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  // Delivery destination
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  // Created/approved by
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  items         PurchaseOrderItem[]
+  stockMovements StockMovement[]
+
+  @@map("purchase_orders")
+}
+
+/// A line item within a purchase order
+model PurchaseOrderItem {
+  id               String  @id @default(cuid())
+  orderedQuantity  Decimal @db.Decimal(12, 3)
+  receivedQuantity Decimal @db.Decimal(12, 3) @default(0)
+  unitPrice        Decimal @db.Decimal(12, 2)
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+// ─────────────────────────────────────────────
+// EMPLOYEES
+// ─────────────────────────────────────────────
+
+/// An Aqila employee (linked to a User account for login)
+model Employee {
+  id           String   @id @default(cuid())
+  employeeCode String   @unique  // e.g. "AQ-0042"
+  firstName    String
+  lastName     String
+  phone        String?
+  address      String?
+  photoUrl     String?
+  hireDate     DateTime
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+
+  attendance   Attendance[]
+  shifts       Shift[]
+  projects     ProjectEmployee[]
+
+  @@map("employees")
+}
+
+/// Daily attendance record for an employee
+model Attendance {
+  id         String           @id @default(cuid())
+  date       DateTime         @db.Date
+  status     AttendanceStatus @default(PRESENT)
+  checkIn    DateTime?
+  checkOut   DateTime?
+  hoursWorked Decimal?        @db.Decimal(5, 2)
+  notes      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, date])
+  @@map("attendance")
+}
+
+/// A scheduled shift for an employee
+model Shift {
+  id         String   @id @default(cuid())
+  startTime  DateTime
+  endTime    DateTime
+  title      String?  // "Morning shift", "Site visit"
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("shifts")
+}
+
+// ─────────────────────────────────────────────
+// PROJECTS / WORK ORDERS
+// ─────────────────────────────────────────────
+
+/// An installation project or work order
+model Project {
+  id          String        @id @default(cuid())
+  projectCode String        @unique  // e.g. "PRJ-2026-0018"
+  name        String
+  description String?
+  status      ProjectStatus @default(PLANNING)
+  startDate   DateTime?
+  endDate     DateTime?
+  clientName  String?
+  clientPhone String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+
+  employees     ProjectEmployee[]
+  materials     ProjectMaterial[]
+  stockMovements StockMovement[]
+
+  @@map("projects")
+}
+
+/// Many-to-many: employees assigned to a project
+model ProjectEmployee {
+  projectId  String
+  employeeId String
+  role       String?    // "Lead", "Assistant"
+  assignedAt DateTime   @default(now())
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, employeeId])
+  @@map("project_employees")
+}
+
+/// Materials reserved or consumed by a project
+model ProjectMaterial {
+  id               String   @id @default(cuid())
+  reservedQuantity Decimal  @db.Decimal(12, 3) @default(0)
+  usedQuantity     Decimal  @db.Decimal(12, 3) @default(0)
+  unitCostAtTime   Decimal  @db.Decimal(12, 2) @default(0)  // snapshot of price
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@unique([projectId, productId])
+  @@map("project_materials")
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+/// DB-stored notification queue (low-stock alerts, PO events, etc.)
+model Notification {
+  id        String           @id @default(cuid())
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}

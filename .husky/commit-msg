@@ -1,0 +1,4 @@
+#!/bin/sh
+# Enforce Conventional Commits format on every commit message
+# Valid: feat: Add stock alert, fix: Correct PO total calc
+npx --no-install commitlint --edit "$1"

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run lint-staged before each commit
+# Ensures only properly formatted, linted code is committed
+npx lint-staged

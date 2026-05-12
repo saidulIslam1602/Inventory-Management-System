@@ -1,0 +1,76 @@
+/**
+ * Global TypeScript types for Aqila IMS.
+ * Re-exports Prisma enums and defines shared UI/API types.
+ */
+
+import type { UserRole, LocationType, MovementType, POStatus, ProjectStatus, AttendanceStatus, NotificationType } from "@prisma/client";
+
+// Re-export Prisma enums for use throughout the app
+export type { UserRole, LocationType, MovementType, POStatus, ProjectStatus, AttendanceStatus, NotificationType };
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+
+export interface NavItem {
+  title: string;
+  href: string;
+  icon?: React.ComponentType<{ className?: string }>;
+  badge?: number;
+  children?: NavItem[];
+}
+
+// ── API response wrapper ──────────────────────────────────────────────────────
+
+export type ActionResult<T = void> =
+  | { success: true; data: T; message?: string }
+  | { success: false; error: string };
+
+// ── Table / pagination ────────────────────────────────────────────────────────
+
+export interface PaginationParams {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+// ── Dashboard KPIs ────────────────────────────────────────────────────────────
+
+export interface DashboardStats {
+  totalProducts: number;
+  totalStockValue: number;
+  lowStockCount: number;
+  pendingPOCount: number;
+  activeEmployeesToday: number;
+  activeProjectsCount: number;
+}
+
+// ── Extend NextAuth types to include role ─────────────────────────────────────
+declare module "next-auth" {
+  interface User {
+    role: UserRole;
+  }
+  interface Session {
+    user: {
+      id: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+      role: UserRole;
+    };
+  }
+}
+
+declare module "@auth/core/adapters" {
+  interface AdapterUser {
+    role: UserRole;
+  }
+}
