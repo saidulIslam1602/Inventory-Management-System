@@ -32,6 +32,8 @@ export interface NavItem {
   icon?: React.ComponentType<{ className?: string }>;
   badge?: number;
   children?: NavItem[];
+  /** If set, only these roles see the item (STAFF filter still applies). */
+  roles?: UserRole[];
 }
 
 // ── API response wrapper ──────────────────────────────────────────────────────

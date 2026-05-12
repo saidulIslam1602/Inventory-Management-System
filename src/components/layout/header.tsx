@@ -6,12 +6,11 @@
  */
 
 import { usePathname } from "next/navigation";
-import Link from "next/link";
 import { logout } from "@/lib/actions/auth";
-import { Bell, LogOut, ChevronRight } from "lucide-react";
+import { clearAuthPageCaches } from "@/lib/pwa-cache";
+import { LogOut, ChevronRight } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -21,11 +20,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { GlobalSearchCommand } from "@/components/layout/global-search-command";
+import { HeaderNotificationsMenu } from "@/components/layout/header-notifications-menu";
 
 // Map route paths to human-readable breadcrumb labels
 const PATH_LABELS: Record<string, string> = {
   me: "My portal",
   dashboard: "Dashboard",
+  manager: "Manager hub",
   inventory: "Inventory",
   "purchase-orders": "Purchase Orders",
   employees: "Employees",
@@ -86,19 +88,13 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
         ))}
       </nav>
 
+      {/* Quick search */}
+      <GlobalSearchCommand />
+
       {/* Right actions */}
       <div className="flex items-center gap-2">
         {/* Notifications bell */}
-        <Button variant="ghost" size="icon" className="text-muted-foreground relative" asChild>
-          <Link href="/me#portal-notifications" aria-label="Open notifications on My portal">
-            <Bell className="h-4 w-4" />
-            {notificationCount > 0 && (
-              <Badge className="bg-destructive text-destructive-foreground border-background pointer-events-none absolute -right-0.5 -top-0.5 h-4 min-w-4 px-1 text-[10px]">
-                {notificationCount > 99 ? "99+" : notificationCount}
-              </Badge>
-            )}
-          </Link>
-        </Button>
+        <HeaderNotificationsMenu unreadCount={notificationCount} />
 
         {/* User menu — server action logout (Auth.js v5); simple trigger avoids focus/ref issues with nested Avatar */}
         <DropdownMenu>
@@ -121,6 +117,7 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
               variant="destructive"
               className="cursor-pointer"
               onClick={() => {
+                clearAuthPageCaches();
                 void logout();
               }}
             >

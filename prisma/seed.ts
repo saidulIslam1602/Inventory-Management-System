@@ -53,10 +53,22 @@ async function main() {
     prisma.projectMaterial.deleteMany(),
     prisma.projectEmployee.deleteMany(),
     prisma.project.deleteMany(),
+    prisma.customer.deleteMany(),
     prisma.attendance.deleteMany(),
     prisma.shift.deleteMany(),
     prisma.notification.deleteMany(),
   ]);
+
+  await prisma.appSettings.upsert({
+    where: { id: "default" },
+    create: {
+      id: "default",
+      exceptionStaleSubmitDays: 2,
+      exceptionOverdueReceiveDays: 7,
+      exceptionMinLowStockBranches: 2,
+    },
+    update: {},
+  });
 
   // ── Locations ──────────────────────────────────────────────────────────────
   console.log("📍 Creating locations...");
@@ -974,6 +986,27 @@ async function main() {
     { name: "Havbruksanlegg svakstrøm", client: "Lofoten Aqua" },
     { name: "Passivhus elektrisk Røst", client: "Statsbygg" },
   ];
+
+  const demoCustomers = await Promise.all(
+    projectBlueprints.map((bp, i) => {
+      const slug = bp.client
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/\p{M}/gu, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      return prisma.customer.create({
+        data: {
+          name: bp.client,
+          phone: `+47 76 ${String(1000 + i).slice(1)} ${String(20 + i).padStart(2, "0")}`,
+          email: i % 2 === 0 ? `kontakt@${slug || "kunde"}.no` : null,
+          isActive: true,
+        },
+      });
+    })
+  );
+  const customerIdByName = new Map(demoCustomers.map((c) => [c.name, c.id] as const));
+
   for (let i = 0; i < 24; i++) {
     const bp = projectBlueprints[i % projectBlueprints.length]!;
     const start = addDays(demoStart, 8 + Math.floor(rand() * 320));
@@ -1003,6 +1036,7 @@ async function main() {
               : addDays(start, span),
         clientName: bp.client,
         clientPhone: "76 00 00 00",
+        customerId: customerIdByName.get(bp.client) ?? null,
         createdAt: addDays(start, -5),
         locationId: loc.id,
         employees: {
@@ -1017,7 +1051,7 @@ async function main() {
       },
     });
   }
-  console.log("   ✓ 24 projects created");
+  console.log("   ✓ Demo customers & 24 projects created");
 
   // ── Attendance (weekdays, ~1 year) ────────────────────────────────────────
   console.log("🕐 Generating attendance (weekdays, last ~12 months)…");
@@ -1082,18 +1116,24 @@ async function main() {
   console.log("🔔 Creating notifications…");
   const notifTypes: NotificationType[] = [
     NotificationType.LOW_STOCK,
+    NotificationType.PO_SUBMITTED,
     NotificationType.PO_APPROVED,
+    NotificationType.PO_ORDERED,
     NotificationType.PO_RECEIVED,
     NotificationType.PROJECT_STARTED,
     NotificationType.PROJECT_COMPLETED,
+    NotificationType.DAILY_DIGEST,
     NotificationType.SYSTEM,
   ];
   const notifTitles: Record<NotificationType, string[]> = {
     LOW_STOCK: ["Lav beholdning: NYM 3x2.5", "Påfyll Zaptec", "MCB 16A under minimum"],
+    PO_SUBMITTED: ["PO sendt til godkjenning", "Ny bestilling venter"],
     PO_APPROVED: ["PO godkjent", "Innkjøp klar for sending"],
+    PO_ORDERED: ["Bestilt fra leverandør", "PO sendt"],
     PO_RECEIVED: ["Varer ankom Svolvær", "Parti mottatt Gravdal"],
     PROJECT_STARTED: ["Prosjekt startet", "Ny arbeidsordre aktiv"],
     PROJECT_COMPLETED: ["Prosjekt avsluttet", "Sluttført: melding til kunde"],
+    DAILY_DIGEST: ["Daglig sammendrag", "Driftsnotat for deg"],
     SYSTEM: ["Kvartalsrapport klar", "Vedlikeholdsnett nattestopp"],
   };
   for (let n = 0; n < 48; n++) {

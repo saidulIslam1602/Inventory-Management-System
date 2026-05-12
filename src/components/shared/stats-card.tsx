@@ -60,7 +60,12 @@ export function StatsCard({
     : "";
 
   return (
-    <Card className={cn("shadow-sm", className)}>
+    <Card
+      className={cn(
+        "app-content-surface shadow-sm hover:shadow-md motion-safe:hover:-translate-y-px",
+        className
+      )}
+    >
       <CardContent className="p-5 sm:p-6">
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">

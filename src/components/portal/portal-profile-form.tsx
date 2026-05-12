@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { updateMyEmployeeProfile } from "@/lib/actions/employee-profile";
+import { UserMessage } from "@/lib/user-messages";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,19 +34,20 @@ export function PortalProfileForm({
     const r = await updateMyEmployeeProfile({ phone, address });
     setSubmitting(false);
     if (!r.success) {
-      setError(r.error ?? "Failed");
+      setError(r.error ?? UserMessage.error.contactNotSaved);
       return;
     }
-    setOk(r.message ?? "Saved");
+    setOk(r.message ?? "Your contact information was saved successfully.");
     router.refresh();
   }
 
   return (
     <Card className="shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base font-semibold">My contact details</CardTitle>
+        <CardTitle className="text-base font-semibold">Contact information</CardTitle>
         <p className="text-muted-foreground text-xs font-normal">
-          You can update phone and address. Other fields are managed by HR.
+          You may update your phone number and postal address here. Other personal or employment
+          details are maintained by Human Resources; contact HR if anything else needs to change.
         </p>
       </CardHeader>
       <CardContent>
@@ -61,31 +63,35 @@ export function PortalProfileForm({
             </Alert>
           )}
           <div className="space-y-2">
-            <Label htmlFor="portal-phone">Phone</Label>
+            <Label htmlFor="portal-phone">Phone number</Label>
             <Input
               id="portal-phone"
+              type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               autoComplete="tel"
+              placeholder="e.g. +47 123 45 678"
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="portal-address">Address</Label>
+            <Label htmlFor="portal-address">Postal address</Label>
             <Textarea
               id="portal-address"
               rows={3}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
+              autoComplete="street-address"
+              placeholder="Street, postal code, city"
             />
           </div>
           <Button type="submit" className="w-full sm:w-auto" disabled={submitting}>
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving…
+                Saving changes…
               </>
             ) : (
-              "Save"
+              "Save changes"
             )}
           </Button>
         </form>

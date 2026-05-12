@@ -3,24 +3,25 @@
  */
 
 import { NextResponse } from "next/server";
-import { MovementType } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { searchParamFirst } from "@/lib/search-params";
 import { BUSINESS_TIME_ZONE } from "@/lib/business-calendar";
 import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
-import {
-  MOVEMENT_TYPES,
-  buildStockMovementWhere,
-  stockMovementListInclude,
-} from "@/lib/queries/stock-movements";
+import { buildStockMovementWhere, stockMovementListInclude } from "@/lib/queries/stock-movements";
+import { stockMovementsExportQuerySchema } from "@/lib/validations/export-queries";
+import { UserMessage } from "@/lib/user-messages";
+import { canExportFinancialCsv } from "@/lib/rbac";
 
 const EXPORT_CAP = 50_000;
 
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: UserMessage.api.unauthorized }, { status: 401 });
+  }
+  if (!canExportFinancialCsv(session.user.role)) {
+    return NextResponse.json({ error: UserMessage.api.forbidden }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -29,18 +30,32 @@ export async function GET(req: Request) {
     return searchParamFirst(v ?? undefined);
   };
 
-  const typeRaw = pick("type");
-  const type =
-    typeRaw && (MOVEMENT_TYPES as readonly string[]).includes(typeRaw)
-      ? (typeRaw as MovementType)
-      : undefined;
+  const filters = stockMovementsExportQuerySchema.safeParse({
+    type: pick("type"),
+    location: pick("location"),
+    product: pick("product"),
+    q: pick("q"),
+    from: pick("from"),
+    to: pick("to"),
+  });
+  if (!filters.success) {
+    return NextResponse.json(
+      {
+        error: filters.error.issues[0]?.message ?? UserMessage.api.invalidExportFilters,
+      },
+      { status: 400 }
+    );
+  }
+
+  const { type, location, product, q, from, to } = filters.data;
 
   const where = buildStockMovementWhere({
     type,
-    locationId: pick("location"),
-    q: pick("q"),
-    dateFrom: pick("from"),
-    dateTo: pick("to"),
+    locationId: location,
+    productId: product,
+    q,
+    dateFrom: from,
+    dateTo: to,
   });
 
   const rows = await prisma.stockMovement.findMany({

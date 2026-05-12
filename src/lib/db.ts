@@ -16,8 +16,22 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-const connectionString =
-  process.env.DATABASE_URL ?? "postgresql://aqila_user:aqila_dev_secret@localhost:15432/aqila_ims";
+/** Local-only default for docker-compose; never used when NODE_ENV is production. */
+const DEV_DATABASE_URL_FALLBACK =
+  "postgresql://aqila_user:aqila_dev_secret@localhost:15432/aqila_ims";
+
+function resolveDatabaseUrl(): string {
+  const fromEnv = process.env.DATABASE_URL?.trim();
+  if (fromEnv) return fromEnv;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "DATABASE_URL must be set in production. Configure the Postgres connection in the environment."
+    );
+  }
+  return DEV_DATABASE_URL_FALLBACK;
+}
+
+const connectionString = resolveDatabaseUrl();
 
 export const prisma =
   globalForPrisma.prisma ??

@@ -16,6 +16,7 @@ import { Header } from "@/components/layout/header";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { ServiceWorkerRegister } from "@/components/service-worker-register";
 
 /** Skip Prisma during `next build` static phase when no database is reachable (CI / fresh clone). */
 export const dynamic = "force-dynamic";
@@ -75,16 +76,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
           lowStockCount={inventoryBadgeCount}
           pendingPOCount={pendingPOCount}
         />
-        <SidebarInset>
+        <SidebarInset className="bg-transparent">
           <Header user={session.user} notificationCount={notificationCount} />
-          <main className="from-muted/35 via-background to-background min-h-[calc(100vh-3.5rem)] flex-1 bg-gradient-to-b">
-            <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
-              {children}
+          <div className="relative isolate flex min-h-[calc(100vh-3.5rem)] flex-1 flex-col">
+            <div
+              className="app-dashboard-backdrop pointer-events-none absolute inset-0 z-0"
+              aria-hidden
+            />
+            <div className="relative z-[1] flex-1">
+              <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-10">
+                {children}
+              </div>
             </div>
-          </main>
+          </div>
         </SidebarInset>
       </SidebarProvider>
       <Toaster richColors position="top-right" />
+      <ServiceWorkerRegister />
     </TooltipProvider>
   );
 }

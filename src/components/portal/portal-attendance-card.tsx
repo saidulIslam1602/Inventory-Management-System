@@ -4,6 +4,7 @@ import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, LogIn, LogOut, Clock } from "lucide-react";
 import { checkInAttendance, checkOutAttendance } from "@/lib/actions/attendance";
+import { UserMessage } from "@/lib/user-messages";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -143,9 +144,9 @@ export function PortalAttendanceCard({
               setOk(null);
               start(async () => {
                 const r = await checkInAttendance();
-                if (!r.success) setError(r.error ?? "Failed");
+                if (!r.success) setError(r.error ?? UserMessage.error.generic);
                 else {
-                  setOk(r.message ?? "Checked in");
+                  setOk(r.message ?? "You are checked in.");
                   router.refresh();
                 }
               });
@@ -164,9 +165,9 @@ export function PortalAttendanceCard({
               setOk(null);
               start(async () => {
                 const r = await checkOutAttendance();
-                if (!r.success) setError(r.error ?? "Failed");
+                if (!r.success) setError(r.error ?? UserMessage.error.generic);
                 else {
-                  setOk(r.message ?? "Checked out");
+                  setOk(r.message ?? "You are checked out.");
                   router.refresh();
                 }
               });

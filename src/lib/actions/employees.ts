@@ -6,6 +6,7 @@ import { UserRole } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createEmployeeSchema, updateEmployeeSchema } from "@/lib/validations/employee";
+import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
 
 function canManageEmployees(role: string | undefined) {
@@ -35,12 +36,15 @@ async function nextEmployeeCode(): Promise<string> {
 export async function createEmployee(formData: unknown): Promise<ActionResult<{ id: string }>> {
   const session = await auth();
   if (!canManageEmployees(session?.user?.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = createEmployeeSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const perm = assertRoleAllowed(session!.user!.role, parsed.data.role);
@@ -49,10 +53,12 @@ export async function createEmployee(formData: unknown): Promise<ActionResult<{ 
   const employeeCode = parsed.data.employeeCode ?? (await nextEmployeeCode());
 
   const existingCode = await prisma.employee.findUnique({ where: { employeeCode } });
-  if (existingCode) return { success: false, error: "Employee code already in use" };
+  if (existingCode) return { success: false, error: "This employee code is already in use." };
 
   const existingEmail = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-  if (existingEmail) return { success: false, error: "A user with this email already exists" };
+  if (existingEmail) {
+    return { success: false, error: "An account with this email address already exists." };
+  }
 
   try {
     const passwordHash = await bcrypt.hash(parsed.data.password, 12);
@@ -87,21 +93,31 @@ export async function createEmployee(formData: unknown): Promise<ActionResult<{ 
     });
 
     revalidatePath("/employees");
-    return { success: true, data: { id: result.id }, message: "Employee created" };
+    return {
+      success: true,
+      data: { id: result.id },
+      message: "Employee was created successfully.",
+    };
   } catch {
-    return { success: false, error: "Failed to create employee" };
+    return {
+      success: false,
+      error: "The employee could not be created. Please try again.",
+    };
   }
 }
 
 export async function updateEmployee(formData: unknown): Promise<ActionResult> {
   const session = await auth();
   if (!canManageEmployees(session?.user?.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = updateEmployeeSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const perm = assertRoleAllowed(session!.user!.role, parsed.data.role);
@@ -111,16 +127,18 @@ export async function updateEmployee(formData: unknown): Promise<ActionResult> {
     where: { id: parsed.data.employeeId },
     include: { user: true },
   });
-  if (!emp) return { success: false, error: "Employee not found" };
+  if (!emp) return { success: false, error: "That employee could not be found." };
 
   const codeOwner = await prisma.employee.findFirst({
     where: { employeeCode: parsed.data.employeeCode, NOT: { id: emp.id } },
   });
-  if (codeOwner) return { success: false, error: "Employee code already in use" };
+  if (codeOwner) return { success: false, error: "This employee code is already in use." };
 
   if (parsed.data.email !== emp.user.email) {
     const emailTaken = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-    if (emailTaken) return { success: false, error: "A user with this email already exists" };
+    if (emailTaken) {
+      return { success: false, error: "An account with this email address already exists." };
+    }
   }
 
   try {
@@ -158,8 +176,11 @@ export async function updateEmployee(formData: unknown): Promise<ActionResult> {
 
     revalidatePath("/employees");
     revalidatePath(`/employees/${emp.id}`);
-    return { success: true, data: undefined, message: "Employee updated" };
+    return { success: true, data: undefined, message: "Employee was saved successfully." };
   } catch {
-    return { success: false, error: "Failed to update employee" };
+    return {
+      success: false,
+      error: "The employee could not be saved. Please try again.",
+    };
   }
 }

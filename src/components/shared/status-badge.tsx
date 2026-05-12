@@ -40,6 +40,12 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
   LATE: { label: "Late", className: "bg-warning/18 text-warning-foreground border-warning/30" },
   HALF_DAY: { label: "Half Day", className: "bg-info/15 text-info border-info/25" },
   LEAVE: { label: "Leave", className: "bg-muted text-muted-foreground border-border" },
+  // PO audit kinds (PurchaseOrderAuditLog.kind)
+  STATUS_CHANGE: {
+    label: "Status",
+    className: "bg-muted text-muted-foreground border-border",
+  },
+  RECEIPT: { label: "Receipt", className: "bg-primary/10 text-primary border-primary/20" },
 };
 
 interface StatusBadgeProps {

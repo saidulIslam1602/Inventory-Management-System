@@ -15,6 +15,8 @@ import {
   receiveIncomingSchema,
   stockMovementSchema,
 } from "@/lib/validations/inventory";
+import { UserMessage } from "@/lib/user-messages";
+import { canRecordStockMovement } from "@/lib/rbac";
 import type { ActionResult } from "@/types";
 import type { Product } from "@prisma/client";
 
@@ -23,25 +25,31 @@ import type { Product } from "@prisma/client";
 export async function createProduct(formData: unknown): Promise<ActionResult<Product>> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = productSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   try {
     // Check SKU uniqueness
     const existing = await prisma.product.findUnique({ where: { sku: parsed.data.sku } });
-    if (existing) return { success: false, error: "A product with this SKU already exists" };
+    if (existing) return { success: false, error: "A product with this SKU already exists." };
 
     if (parsed.data.barcode) {
       const barcodeTaken = await prisma.product.findUnique({
         where: { barcode: parsed.data.barcode },
       });
       if (barcodeTaken)
-        return { success: false, error: "This barcode is already registered on another product" };
+        return {
+          success: false,
+          error: "This barcode is already used on another product.",
+        };
     }
 
     const product = await prisma.product.create({
@@ -60,9 +68,12 @@ export async function createProduct(formData: unknown): Promise<ActionResult<Pro
     });
 
     revalidatePath("/inventory");
-    return { success: true, data: product, message: "Product created successfully" };
+    return { success: true, data: product, message: "Product was created successfully." };
   } catch {
-    return { success: false, error: "Failed to create product" };
+    return {
+      success: false,
+      error: "The product could not be created. Please try again.",
+    };
   }
 }
 
@@ -71,12 +82,15 @@ export async function createProduct(formData: unknown): Promise<ActionResult<Pro
 export async function updateProduct(id: string, formData: unknown): Promise<ActionResult<Product>> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = productSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   try {
@@ -85,7 +99,10 @@ export async function updateProduct(id: string, formData: unknown): Promise<Acti
         where: { barcode: parsed.data.barcode, NOT: { id } },
       });
       if (barcodeTaken)
-        return { success: false, error: "This barcode is already registered on another product" };
+        return {
+          success: false,
+          error: "This barcode is already used on another product.",
+        };
     }
 
     const product = await prisma.product.update({
@@ -105,9 +122,12 @@ export async function updateProduct(id: string, formData: unknown): Promise<Acti
     });
 
     revalidatePath("/inventory");
-    return { success: true, data: product, message: "Product updated successfully" };
+    return { success: true, data: product, message: "Product was saved successfully." };
   } catch {
-    return { success: false, error: "Failed to update product" };
+    return {
+      success: false,
+      error: "The product could not be saved. Please try again.",
+    };
   }
 }
 
@@ -116,15 +136,22 @@ export async function updateProduct(id: string, formData: unknown): Promise<Acti
 export async function toggleProductActive(id: string, isActive: boolean): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   try {
     await prisma.product.update({ where: { id }, data: { isActive } });
     revalidatePath("/inventory");
-    return { success: true, data: undefined };
+    return {
+      success: true,
+      data: undefined,
+      message: isActive ? "Product was activated." : "Product was deactivated.",
+    };
   } catch {
-    return { success: false, error: "Failed to update product" };
+    return {
+      success: false,
+      error: "Product status could not be updated. Please try again.",
+    };
   }
 }
 
@@ -132,11 +159,17 @@ export async function toggleProductActive(id: string, isActive: boolean): Promis
 
 export async function createStockMovement(formData: unknown): Promise<ActionResult> {
   const session = await auth();
-  if (!session?.user) return { success: false, error: "Not authenticated" };
+  if (!session?.user) return { success: false, error: UserMessage.auth.signInRequired };
+  if (!canRecordStockMovement(session.user.role)) {
+    return { success: false, error: UserMessage.permission.denied };
+  }
 
   const parsed = stockMovementSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const {
@@ -155,7 +188,7 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
 
   try {
     const stock = await prisma.stock.findUnique({ where: { id: stockId } });
-    if (!stock) return { success: false, error: "Stock record not found" };
+    if (!stock) return { success: false, error: "That stock record could not be found." };
 
     const onHand = Number(stock.quantity);
     const reserved = Number(stock.reserved);
@@ -166,34 +199,40 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
       if (onHand < quantity) {
         return {
           success: false,
-          error: `Insufficient stock on hand. On hand: ${onHand}`,
+          error: `Not enough stock on hand (${onHand} available).`,
         };
       }
       if (unreserved < quantity) {
         return {
           success: false,
-          error: `Insufficient unreserved stock. Available (not reserved): ${unreserved}`,
+          error: `Not enough unreserved stock (available: ${unreserved}).`,
         };
       }
     }
 
     if (type === "TRANSFER") {
       if (!toLocationId) {
-        return { success: false, error: "Transfer requires a destination location" };
+        return {
+          success: false,
+          error: "A transfer must specify a destination location.",
+        };
       }
       if (toLocationId === stock.locationId) {
-        return { success: false, error: "Source and destination location must differ" };
+        return {
+          success: false,
+          error: "Source and destination locations must be different.",
+        };
       }
       if (onHand < quantity) {
         return {
           success: false,
-          error: `Insufficient stock to transfer. On hand: ${onHand}`,
+          error: `Not enough stock to transfer (${onHand} on hand).`,
         };
       }
       if (unreserved < quantity) {
         return {
           success: false,
-          error: `Cannot transfer reserved quantity. Unreserved available: ${unreserved}`,
+          error: `Cannot transfer reserved quantity (unreserved available: ${unreserved}).`,
         };
       }
     }
@@ -269,9 +308,12 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
 
     revalidatePath("/inventory");
     revalidatePath("/dashboard");
-    return { success: true, data: undefined, message: "Movement recorded successfully" };
+    return { success: true, data: undefined, message: "Stock movement was recorded successfully." };
   } catch {
-    return { success: false, error: "Failed to record movement" };
+    return {
+      success: false,
+      error: "Stock movement could not be recorded. Please try again.",
+    };
   }
 }
 
@@ -321,12 +363,15 @@ export async function receiveIncomingGoods(
 ): Promise<ActionResult<{ productName: string }>> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER", "STAFF"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = receiveIncomingSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const { locationId, code, quantity, note } = parsed.data;
@@ -345,7 +390,7 @@ export async function receiveIncomingGoods(
       return {
         success: false,
         error:
-          "No active product matches this barcode or SKU. Register the product or check the code.",
+          "No active product matches this barcode or SKU. Add the product first or check the code.",
       };
     }
 
@@ -404,10 +449,13 @@ export async function receiveIncomingGoods(
     return {
       success: true,
       data: { productName: product.name },
-      message: `Recorded ${quantity} ${product.unit.symbol} in — ${product.name}`,
+      message: `Recorded ${quantity} ${product.unit.symbol} in for ${product.name}.`,
     };
   } catch {
-    return { success: false, error: "Failed to record goods in" };
+    return {
+      success: false,
+      error: "Goods receipt could not be recorded. Please try again.",
+    };
   }
 }
 
@@ -419,7 +467,7 @@ export async function updateReorderPoint(
 ): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   try {
@@ -428,8 +476,11 @@ export async function updateReorderPoint(
       data: { reorderPoint },
     });
     revalidatePath("/inventory");
-    return { success: true, data: undefined };
+    return { success: true, data: undefined, message: "Reorder point was updated successfully." };
   } catch {
-    return { success: false, error: "Failed to update reorder point" };
+    return {
+      success: false,
+      error: "Reorder point could not be updated. Please try again.",
+    };
   }
 }

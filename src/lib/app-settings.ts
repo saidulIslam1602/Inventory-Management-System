@@ -1,0 +1,42 @@
+/**
+ * Tenant-wide app settings (singleton row `default`).
+ */
+
+import { prisma } from "@/lib/db";
+
+const DEFAULT_ID = "default";
+
+export type AppSettingsRow = {
+  id: string;
+  exceptionStaleSubmitDays: number;
+  exceptionOverdueReceiveDays: number;
+  exceptionMinLowStockBranches: number;
+};
+
+export async function getAppSettings(): Promise<AppSettingsRow> {
+  const row = await prisma.appSettings.findUnique({
+    where: { id: DEFAULT_ID },
+  });
+  if (row) {
+    return {
+      id: row.id,
+      exceptionStaleSubmitDays: row.exceptionStaleSubmitDays,
+      exceptionOverdueReceiveDays: row.exceptionOverdueReceiveDays,
+      exceptionMinLowStockBranches: row.exceptionMinLowStockBranches,
+    };
+  }
+  const created = await prisma.appSettings.create({
+    data: {
+      id: DEFAULT_ID,
+      exceptionStaleSubmitDays: 2,
+      exceptionOverdueReceiveDays: 7,
+      exceptionMinLowStockBranches: 2,
+    },
+  });
+  return {
+    id: created.id,
+    exceptionStaleSubmitDays: created.exceptionStaleSubmitDays,
+    exceptionOverdueReceiveDays: created.exceptionOverdueReceiveDays,
+    exceptionMinLowStockBranches: created.exceptionMinLowStockBranches,
+  };
+}

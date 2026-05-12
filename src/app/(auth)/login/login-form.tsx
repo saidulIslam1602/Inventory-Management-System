@@ -62,8 +62,8 @@ export function LoginForm() {
 
   return (
     <div className="flex min-h-screen">
-      <div className="bg-sidebar hidden flex-col justify-between p-12 lg:flex lg:w-1/2">
-        <div className="flex items-center gap-3">
+      <div className="app-login-brand-panel text-sidebar-foreground hidden flex-col justify-between p-12 lg:flex lg:w-1/2">
+        <div className="relative z-[1] flex items-center gap-3">
           <div className="bg-primary flex h-10 w-10 items-center justify-center rounded-lg">
             <Zap className="text-primary-foreground h-6 w-6" />
           </div>
@@ -72,7 +72,7 @@ export function LoginForm() {
           </span>
         </div>
 
-        <div>
+        <div className="relative z-[1]">
           <blockquote className="text-sidebar-foreground/80 mb-6 text-2xl font-light leading-relaxed">
             &ldquo;Vi kobler Lofoten sammen&rdquo;
           </blockquote>
@@ -81,14 +81,17 @@ export function LoginForm() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="relative z-[1] grid grid-cols-2 gap-4">
           {[
             { label: "Locations", value: "4 branches" },
             { label: "Services", value: "Elektro · Alarm · EV" },
             { label: "Founded", value: "1985" },
             { label: "Region", value: "Lofoten" },
           ].map((stat) => (
-            <div key={stat.label} className="bg-sidebar-accent rounded-lg p-4">
+            <div
+              key={stat.label}
+              className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-sm backdrop-blur-[2px]"
+            >
               <div className="text-sidebar-foreground/50 mb-1 text-xs">{stat.label}</div>
               <div className="text-sidebar-foreground text-sm font-medium">{stat.value}</div>
             </div>
@@ -96,8 +99,8 @@ export function LoginForm() {
         </div>
       </div>
 
-      <div className="bg-background flex flex-1 items-center justify-center p-6 sm:p-8">
-        <div className="w-full max-w-md">
+      <div className="app-login-form-side bg-background relative flex flex-1 items-center justify-center p-6 sm:p-8">
+        <div className="relative z-[1] w-full max-w-md">
           <div className="mb-8 flex items-center gap-2 lg:hidden">
             <div className="bg-primary flex h-8 w-8 items-center justify-center rounded-lg">
               <Zap className="text-primary-foreground h-5 w-5" />
@@ -105,7 +108,7 @@ export function LoginForm() {
             <span className="text-foreground font-semibold">Aqila IMS</span>
           </div>
 
-          <div className="border-border/80 bg-card ring-foreground/5 rounded-2xl border p-6 shadow-sm ring-1 sm:p-8">
+          <div className="border-border/80 bg-card/85 ring-foreground/5 supports-[backdrop-filter]:bg-card/75 rounded-2xl border p-6 shadow-md ring-1 backdrop-blur-md sm:p-8">
             <h1 className="text-foreground mb-1 text-2xl font-semibold tracking-tight">
               Welcome back
             </h1>
@@ -162,10 +165,13 @@ export function LoginForm() {
             </form>
           </div>
 
-          <p className="text-muted-foreground mt-8 text-center text-xs leading-relaxed">
-            Demo: admin@aqila.no · manager@aqila.no · staff@aqila.no — password{" "}
-            <span className="font-mono">Aqila2026!</span>
-          </p>
+          {(process.env.NODE_ENV === "development" ||
+            process.env.NEXT_PUBLIC_SHOW_LOGIN_DEMO === "true") && (
+            <p className="text-muted-foreground mt-8 text-center text-xs leading-relaxed">
+              Demo: admin@aqila.no · manager@aqila.no · staff@aqila.no — password{" "}
+              <span className="font-mono">Aqila2026!</span>
+            </p>
+          )}
           <p className="text-muted-foreground mt-2 text-center text-xs">
             Aqila IMS v1.0.0 &mdash; Internal use only
           </p>

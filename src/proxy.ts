@@ -3,33 +3,36 @@
  *
  * All /dashboard routes require authentication.
  * Role-based access is enforced per route group:
- *   /settings  → ADMIN only
- *   All other  → any authenticated user
+ *   /settings → ADMIN only
+ *   /employees, /reports, /manager → STAFF blocked (redirect to /me)
+ *   All listed prefixes → authentication required
  *
  * Unauthenticated users are redirected to /login.
  */
 
 import NextAuth from "next-auth";
 import authConfig from "@/lib/auth.config";
+import { canAccessAdminSettings, staffBlockedPathname } from "@/lib/rbac";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /** Keep this file free of Prisma/bcrypt — Node-only modules break the Edge bundle. */
 const { auth: withAuth } = NextAuth(authConfig);
 
-// Routes that require authentication
+// Routes that require authentication (edge redirect before RSC; APIs use per-route auth())
 const PROTECTED_PREFIXES = [
   "/dashboard",
+  "/me",
+  "/manager",
   "/inventory",
   "/purchase-orders",
+  "/suppliers",
   "/employees",
   "/projects",
+  "/customers",
   "/reports",
   "/settings",
 ];
-
-// Routes restricted to ADMIN role only
-const ADMIN_ONLY_PREFIXES = ["/settings/users"];
 
 export default withAuth((req: NextRequest & { auth: { user?: { role?: string } } | null }) => {
   const { pathname } = req.nextUrl;
@@ -46,9 +49,14 @@ export default withAuth((req: NextRequest & { auth: { user?: { role?: string } }
   }
 
   // Enforce admin-only routes
-  const isAdminRoute = ADMIN_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-  if (isAdminRoute && req.auth.user.role !== "ADMIN") {
+  const role = req.auth.user.role;
+
+  if (pathname.startsWith("/settings") && !canAccessAdminSettings(role)) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
+  if (role === "STAFF" && staffBlockedPathname(pathname)) {
+    return NextResponse.redirect(new URL("/me", req.url));
   }
 
   return NextResponse.next();

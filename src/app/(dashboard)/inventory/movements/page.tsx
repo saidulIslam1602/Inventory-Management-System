@@ -38,6 +38,7 @@ type PageProps = {
 
 export default async function MovementsPage({ searchParams }: PageProps) {
   const sp = await searchParams;
+  const productId = searchParamFirst(sp.product);
   const typeRaw = searchParamFirst(sp.type);
   const locationId = searchParamFirst(sp.location);
   const q = searchParamFirst(sp.q);
@@ -51,9 +52,9 @@ export default async function MovementsPage({ searchParams }: PageProps) {
       ? (typeRaw as MovementType)
       : undefined;
 
-  const where = buildStockMovementWhere({ type, locationId, q, dateFrom, dateTo });
+  const where = buildStockMovementWhere({ type, locationId, productId, q, dateFrom, dateTo });
 
-  const [total, movements, locations] = await Promise.all([
+  const [total, movements, locations, productHint] = await Promise.all([
     prisma.stockMovement.count({ where }),
     prisma.stockMovement.findMany({
       where,
@@ -67,11 +68,18 @@ export default async function MovementsPage({ searchParams }: PageProps) {
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    productId
+      ? prisma.product.findUnique({
+          where: { id: productId },
+          select: { name: true, sku: true },
+        })
+      : Promise.resolve(null),
   ]);
 
   const baseParams: Record<string, string | undefined> = {
     type: typeRaw,
     location: locationId,
+    product: productId,
     q,
     from: dateFrom,
     to: dateTo,
@@ -80,6 +88,7 @@ export default async function MovementsPage({ searchParams }: PageProps) {
   const exportQs = toQueryString({
     type: typeRaw,
     location: locationId,
+    product: productId,
     q,
     from: dateFrom,
     to: dateTo,
@@ -88,7 +97,7 @@ export default async function MovementsPage({ searchParams }: PageProps) {
     ? `/api/export/stock-movements?${exportQs}`
     : "/api/export/stock-movements";
 
-  const hasFilters = Boolean(type || locationId || q || dateFrom || dateTo);
+  const hasFilters = Boolean(type || locationId || productId || q || dateFrom || dateTo);
 
   return (
     <div className="space-y-6">
@@ -108,8 +117,18 @@ export default async function MovementsPage({ searchParams }: PageProps) {
         <CardContent className="p-0 pt-4">
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 pb-3">
             <p className="text-muted-foreground text-xs">
-              {hasFilters ? "Filters narrow the list." : "Showing latest movements first."} Oslo
-              timestamps in the table.
+              {productHint ? (
+                <>
+                  Movement history for{" "}
+                  <span className="text-foreground font-medium">{productHint.name}</span>{" "}
+                  <span className="font-mono">({productHint.sku})</span>.{" "}
+                </>
+              ) : hasFilters ? (
+                "Filters narrow the list. "
+              ) : (
+                "Showing latest movements first. "
+              )}
+              Oslo timestamps in the table.
             </p>
             <Button variant="outline" size="sm" asChild>
               <a href={exportHref}>Download CSV (filtered)</a>
@@ -172,6 +191,15 @@ export default async function MovementsPage({ searchParams }: PageProps) {
               <div className="space-y-1.5">
                 <Label className="text-muted-foreground text-xs">To (Oslo date)</Label>
                 <Input type="date" name="to" defaultValue={dateTo ?? ""} className="h-8" />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2 lg:col-span-3 xl:col-span-6">
+                <Label className="text-muted-foreground text-xs">Exact product ID (optional)</Label>
+                <Input
+                  name="product"
+                  defaultValue={productId ?? ""}
+                  placeholder="Single catalog product id (e.g. from manager transfer link); narrows to that SKU only"
+                  className="h-8 font-mono text-xs"
+                />
               </div>
             </div>
             <div className="flex flex-wrap items-end gap-3">

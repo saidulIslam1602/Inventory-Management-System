@@ -3,36 +3,52 @@
  */
 
 import { NextResponse } from "next/server";
-import { POStatus } from "@prisma/client";
 import { format } from "date-fns";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { searchParamFirst } from "@/lib/search-params";
 import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
-import { PO_STATUSES, buildPurchaseOrderWhere } from "@/lib/queries/purchase-orders-list";
+import { buildPurchaseOrderWhere } from "@/lib/queries/purchase-orders-list";
+import { purchaseOrdersExportQuerySchema } from "@/lib/validations/export-queries";
+import { UserMessage } from "@/lib/user-messages";
+import { canExportFinancialCsv } from "@/lib/rbac";
 
 const EXPORT_CAP = 50_000;
 
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: UserMessage.api.unauthorized }, { status: 401 });
+  }
+  if (!canExportFinancialCsv(session.user.role)) {
+    return NextResponse.json({ error: UserMessage.api.forbidden }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);
   const pick = (k: string) => searchParamFirst(searchParams.get(k) ?? undefined);
 
-  const statusRaw = pick("status");
-  const status =
-    statusRaw && (PO_STATUSES as readonly string[]).includes(statusRaw)
-      ? (statusRaw as POStatus)
-      : undefined;
+  const filters = purchaseOrdersExportQuerySchema.safeParse({
+    status: pick("status"),
+    supplier: pick("supplier"),
+    location: pick("location"),
+    q: pick("q"),
+  });
+  if (!filters.success) {
+    return NextResponse.json(
+      {
+        error: filters.error.issues[0]?.message ?? UserMessage.api.invalidExportFilters,
+      },
+      { status: 400 }
+    );
+  }
+
+  const { status, supplier, location, q } = filters.data;
 
   const where = buildPurchaseOrderWhere({
     status,
-    supplierId: pick("supplier"),
-    locationId: pick("location"),
-    q: pick("q"),
+    supplierId: supplier,
+    locationId: location,
+    q,
   });
 
   const rows = await prisma.purchaseOrder.findMany({

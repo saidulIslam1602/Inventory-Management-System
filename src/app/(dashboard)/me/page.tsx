@@ -11,7 +11,6 @@ import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
   addCalendarDaysPrismaDate,
@@ -20,6 +19,14 @@ import {
 } from "@/lib/business-calendar";
 import { PortalAttendanceCard } from "@/components/portal/portal-attendance-card";
 import { PortalProfileForm } from "@/components/portal/portal-profile-form";
+import { PortalNotificationPreferencesForm } from "@/components/portal/portal-notification-preferences-form";
+import { PortalNotificationsList } from "@/components/portal/portal-notifications-list";
+import { ensureDailyDigestForUser } from "@/lib/notifications/daily-digest";
+import {
+  wantsDigestDaily,
+  wantsEmailDigestDaily,
+  wantsInstantPoEvent,
+} from "@/lib/notification-preferences";
 import { ScanBarcode, LayoutDashboard, FolderKanban, Package, Bell } from "lucide-react";
 import { formatQuantityNbNo } from "@/lib/utils";
 
@@ -28,6 +35,8 @@ export const metadata: Metadata = { title: "My portal" };
 export default async function EmployeePortalPage() {
   const session = await auth();
   if (!session?.user) return null;
+
+  await ensureDailyDigestForUser(session.user.id);
 
   const emp = await prisma.employee.findUnique({
     where: { userId: session.user.id },
@@ -51,6 +60,7 @@ export default async function EmployeePortalPage() {
     notifications,
     lowStockRows,
     teamPeers,
+    notificationPrefsRow,
   ] = await Promise.all([
     emp
       ? prisma.attendance.findUnique({
@@ -93,7 +103,7 @@ export default async function EmployeePortalPage() {
     prisma.notification.findMany({
       where: { userId: session.user.id },
       orderBy: { createdAt: "desc" },
-      take: 10,
+      take: 60,
     }),
     emp
       ? prisma.$queryRaw<
@@ -128,6 +138,10 @@ export default async function EmployeePortalPage() {
           select: { id: true, firstName: true, lastName: true, employeeCode: true },
         })
       : Promise.resolve([]),
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { notificationPreferences: true },
+    }),
   ]);
 
   const teamAttendance =
@@ -459,6 +473,29 @@ export default async function EmployeePortalPage() {
         </Card>
       )}
 
+      <PortalNotificationPreferencesForm
+        initial={{
+          poSubmitted: wantsInstantPoEvent(
+            notificationPrefsRow?.notificationPreferences,
+            "poSubmitted"
+          ),
+          poApproved: wantsInstantPoEvent(
+            notificationPrefsRow?.notificationPreferences,
+            "poApproved"
+          ),
+          poOrdered: wantsInstantPoEvent(
+            notificationPrefsRow?.notificationPreferences,
+            "poOrdered"
+          ),
+          poReceived: wantsInstantPoEvent(
+            notificationPrefsRow?.notificationPreferences,
+            "poReceived"
+          ),
+          digestDaily: wantsDigestDaily(notificationPrefsRow?.notificationPreferences),
+          emailDigestDaily: wantsEmailDigestDaily(notificationPrefsRow?.notificationPreferences),
+        }}
+      />
+
       <Card id="portal-notifications" className="scroll-mt-24 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base font-semibold">
@@ -469,30 +506,17 @@ export default async function EmployeePortalPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {notifications.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No notifications.</p>
-          ) : (
-            <ul className="space-y-3">
-              {notifications.map((n) => (
-                <li key={n.id} className="border-border/50 border-b pb-2 text-sm last:border-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-medium">{n.title}</div>
-                      <p className="text-muted-foreground mt-0.5 text-xs">{n.message}</p>
-                    </div>
-                    {!n.isRead && (
-                      <Badge variant="secondary" className="shrink-0 text-[10px]">
-                        New
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-muted-foreground mt-1 text-[10px]">
-                    {n.createdAt.toLocaleString("nb-NO", { timeZone: BUSINESS_TIME_ZONE })}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <PortalNotificationsList
+            items={notifications.map((n) => ({
+              id: n.id,
+              title: n.title,
+              message: n.message,
+              isRead: n.isRead,
+              createdAt: n.createdAt.toISOString(),
+              actionHref: n.actionHref ?? null,
+              type: n.type,
+            }))}
+          />
         </CardContent>
       </Card>
 

@@ -3,20 +3,25 @@
  */
 
 import { NextResponse } from "next/server";
-import { ProjectStatus } from "@prisma/client";
 import { format } from "date-fns";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { searchParamFirst } from "@/lib/search-params";
 import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
-import { PROJECT_STATUSES, buildProjectWhere } from "@/lib/queries/projects-list";
+import { buildProjectWhere } from "@/lib/queries/projects-list";
+import { projectsExportQuerySchema } from "@/lib/validations/export-queries";
+import { UserMessage } from "@/lib/user-messages";
+import { canExportFinancialCsv } from "@/lib/rbac";
 
 const EXPORT_CAP = 50_000;
 
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: UserMessage.api.unauthorized }, { status: 401 });
+  }
+  if (!canExportFinancialCsv(session.user.role)) {
+    return NextResponse.json({ error: UserMessage.api.forbidden }, { status: 403 });
   }
 
   const staffSelf =
@@ -30,16 +35,26 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const pick = (k: string) => searchParamFirst(searchParams.get(k) ?? undefined);
 
-  const statusRaw = pick("status");
-  const status =
-    statusRaw && (PROJECT_STATUSES as readonly string[]).includes(statusRaw)
-      ? (statusRaw as ProjectStatus)
-      : undefined;
+  const filters = projectsExportQuerySchema.safeParse({
+    status: pick("status"),
+    location: pick("location"),
+    q: pick("q"),
+  });
+  if (!filters.success) {
+    return NextResponse.json(
+      {
+        error: filters.error.issues[0]?.message ?? UserMessage.api.invalidExportFilters,
+      },
+      { status: 400 }
+    );
+  }
+
+  const { status, location, q } = filters.data;
 
   const where = buildProjectWhere({
     status,
-    locationId: pick("location"),
-    q: pick("q"),
+    locationId: location,
+    q,
     assignedToEmployeeId: staffSelf?.id,
   });
 

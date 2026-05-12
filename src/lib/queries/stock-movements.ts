@@ -11,6 +11,7 @@ export const MOVEMENT_TYPES = Object.values(MovementType);
 export function buildStockMovementWhere(params: {
   type?: MovementType;
   locationId?: string;
+  productId?: string;
   q?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -21,6 +22,7 @@ export function buildStockMovementWhere(params: {
 
   const stockFilter: Prisma.StockWhereInput = {};
   if (params.locationId) stockFilter.locationId = params.locationId;
+  if (params.productId) stockFilter.productId = params.productId;
   if (params.q) {
     stockFilter.product = {
       OR: [

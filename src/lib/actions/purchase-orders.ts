@@ -10,8 +10,14 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { NotificationType, type POStatus } from "@prisma/client";
 import { purchaseOrderSchema, receiveItemsSchema } from "@/lib/validations/purchase-order";
+import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
+import {
+  getOpsLeaderUserIds,
+  notifyUsersForInstantPoPreference,
+} from "@/lib/manager/notify-by-preference";
 
 // ── Generate PO number ────────────────────────────────────────────────────────
 
@@ -30,12 +36,15 @@ export async function createPurchaseOrder(
 ): Promise<ActionResult<{ id: string }>> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = purchaseOrderSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   try {
@@ -67,9 +76,16 @@ export async function createPurchaseOrder(
     });
 
     revalidatePath("/purchase-orders");
-    return { success: true, data: { id: po.id }, message: "Purchase order created" };
+    return {
+      success: true,
+      data: { id: po.id },
+      message: "Purchase order was created successfully.",
+    };
   } catch {
-    return { success: false, error: "Failed to create purchase order" };
+    return {
+      success: false,
+      error: "The purchase order could not be created. Please try again.",
+    };
   }
 }
 
@@ -80,10 +96,13 @@ export async function advancePOStatus(
   action: "submit" | "approve" | "order" | "cancel"
 ): Promise<ActionResult> {
   const session = await auth();
-  if (!session?.user) return { success: false, error: "Not authenticated" };
+  if (!session?.user) return { success: false, error: UserMessage.auth.signInRequired };
 
-  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId } });
-  if (!po) return { success: false, error: "Purchase order not found" };
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id: poId },
+    select: { id: true, status: true, poNumber: true, createdById: true },
+  });
+  if (!po) return { success: false, error: "That purchase order could not be found." };
 
   const STATUS_TRANSITIONS: Record<string, { from: string[]; to: string; requiredRole: string[] }> =
     {
@@ -99,21 +118,77 @@ export async function advancePOStatus(
 
   const transition = STATUS_TRANSITIONS[action];
   if (!transition.requiredRole.includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions for this action" };
+    return { success: false, error: UserMessage.permission.deniedForAction };
   }
   if (!transition.from.includes(po.status)) {
-    return { success: false, error: `Cannot ${action} a PO with status ${po.status}` };
+    return {
+      success: false,
+      error: `This step is not available while the purchase order is in ${po.status} status.`,
+    };
   }
 
   try {
-    await prisma.purchaseOrder.update({
-      where: { id: poId },
-      data: { status: transition.to as "SUBMITTED" | "APPROVED" | "ORDERED" | "CANCELLED" },
+    const fromStatus = po.status;
+    const toStatus = transition.to as POStatus;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.purchaseOrder.update({
+        where: { id: poId },
+        data: { status: toStatus },
+      });
+      await tx.purchaseOrderAuditLog.create({
+        data: {
+          purchaseOrderId: poId,
+          actorUserId: session.user.id,
+          kind: "STATUS_CHANGE",
+          fromStatus,
+          toStatus,
+          details: action === "cancel" ? `Cancelled via workflow (${action}).` : null,
+        },
+      });
     });
+
+    if (action === "submit") {
+      const leaderIds = await getOpsLeaderUserIds();
+      void notifyUsersForInstantPoPreference({
+        preferenceKey: "poSubmitted",
+        type: NotificationType.PO_SUBMITTED,
+        title: "Purchase order submitted",
+        message: `${po.poNumber} is waiting for approval.`,
+        actionHref: `/purchase-orders/${poId}`,
+        candidateUserIds: leaderIds,
+      });
+    } else if (action === "approve") {
+      const leaderIds = await getOpsLeaderUserIds();
+      void notifyUsersForInstantPoPreference({
+        preferenceKey: "poApproved",
+        type: NotificationType.PO_APPROVED,
+        title: "Purchase order approved",
+        message: `${po.poNumber} was approved and can be ordered.`,
+        actionHref: `/purchase-orders/${poId}`,
+        candidateUserIds: [...leaderIds, po.createdById],
+      });
+    } else if (action === "order") {
+      const leaderIds = await getOpsLeaderUserIds();
+      void notifyUsersForInstantPoPreference({
+        preferenceKey: "poOrdered",
+        type: NotificationType.PO_ORDERED,
+        title: "Purchase order placed",
+        message: `${po.poNumber} was marked as ordered with the supplier.`,
+        actionHref: `/purchase-orders/${poId}`,
+        candidateUserIds: [...leaderIds, po.createdById],
+      });
+    }
+
     revalidatePath("/purchase-orders");
+    revalidatePath(`/purchase-orders/${poId}`);
+    revalidatePath("/manager");
     return { success: true, data: undefined };
   } catch {
-    return { success: false, error: "Failed to update status" };
+    return {
+      success: false,
+      error: "Purchase order status could not be updated. Please try again.",
+    };
   }
 }
 
@@ -122,12 +197,15 @@ export async function advancePOStatus(
 export async function receiveItems(formData: unknown): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER", "STAFF"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = receiveItemsSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const { purchaseOrderId, items } = parsed.data;
@@ -138,23 +216,32 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
       include: { items: { include: { product: true } } },
     });
 
-    if (!po) return { success: false, error: "Purchase order not found" };
+    if (!po) return { success: false, error: "That purchase order could not be found." };
     if (!["ORDERED", "PARTIALLY_RECEIVED"].includes(po.status)) {
-      return { success: false, error: "PO must be in ORDERED or PARTIALLY_RECEIVED status" };
+      return {
+        success: false,
+        error:
+          "Goods can only be received while the purchase order is ordered or partially received.",
+      };
     }
+
+    const statusBeforeReceive = po.status as POStatus;
 
     for (const receiveItem of items) {
       if (receiveItem.receivedQuantity <= 0) continue;
       const poItem = po.items.find((i) => i.id === receiveItem.itemId);
       if (!poItem) {
-        return { success: false, error: `Unknown purchase order line: ${receiveItem.itemId}` };
+        return {
+          success: false,
+          error: "One of the lines on this purchase order could not be matched.",
+        };
       }
       const nextReceived = Number(poItem.receivedQuantity) + receiveItem.receivedQuantity;
       const ordered = Number(poItem.orderedQuantity);
       if (nextReceived > ordered + 1e-9) {
         return {
           success: false,
-          error: `Cannot receive more than ordered for ${poItem.product?.sku ?? "line"}: ${nextReceived} > ${ordered}`,
+          error: `Received quantity is too high for ${poItem.product?.sku ?? "this line"} (${nextReceived} > ${ordered} ordered).`,
         };
       }
     }
@@ -218,20 +305,63 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
         (i) => Number(i.receivedQuantity) >= Number(i.orderedQuantity)
       );
 
+      const toStatus: POStatus = allReceived ? "RECEIVED" : "PARTIALLY_RECEIVED";
+
       await tx.purchaseOrder.update({
         where: { id: purchaseOrderId },
         data: {
-          status: allReceived ? "RECEIVED" : "PARTIALLY_RECEIVED",
+          status: toStatus,
           receivedAt: allReceived ? new Date() : null,
+        },
+      });
+
+      const receiptLines = items.filter((i) => i.receivedQuantity > 0);
+      const qtySum = receiptLines.reduce((s, i) => s + i.receivedQuantity, 0);
+      await tx.purchaseOrderAuditLog.create({
+        data: {
+          purchaseOrderId,
+          actorUserId: session.user.id,
+          kind: "RECEIPT",
+          fromStatus: statusBeforeReceive,
+          toStatus,
+          details: `Received ${receiptLines.length} line(s), ${qtySum} units. ${allReceived ? "PO complete." : "Partial — more expected."}`,
         },
       });
     });
 
+    const updatedPo = await prisma.purchaseOrder.findUnique({
+      where: { id: purchaseOrderId },
+      select: { poNumber: true, status: true, createdById: true },
+    });
+    if (updatedPo) {
+      const leaderIds = await getOpsLeaderUserIds();
+      const full = updatedPo.status === "RECEIVED";
+      void notifyUsersForInstantPoPreference({
+        preferenceKey: "poReceived",
+        type: NotificationType.PO_RECEIVED,
+        title: full ? "Purchase order fully received" : "Purchase order partially received",
+        message: full
+          ? `${updatedPo.poNumber} is fully received.`
+          : `${updatedPo.poNumber} had lines received; fulfillment is still partial.`,
+        actionHref: `/purchase-orders/${purchaseOrderId}`,
+        candidateUserIds: [...leaderIds, updatedPo.createdById],
+      });
+    }
+
     revalidatePath("/purchase-orders");
     revalidatePath("/inventory");
     revalidatePath("/dashboard");
-    return { success: true, data: undefined, message: "Items received and stock updated" };
+    revalidatePath("/manager");
+    revalidatePath(`/purchase-orders/${purchaseOrderId}`);
+    return {
+      success: true,
+      data: undefined,
+      message: "Items were received and inventory was updated successfully.",
+    };
   } catch {
-    return { success: false, error: "Failed to process receiving" };
+    return {
+      success: false,
+      error: "Receiving could not be completed. Please try again.",
+    };
   }
 }

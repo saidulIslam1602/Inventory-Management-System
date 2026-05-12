@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MapPin, Tag, Ruler, Users, Bell } from "lucide-react";
+import { getAppSettings } from "@/lib/app-settings";
+import { ExceptionThresholdsForm } from "@/components/settings/exception-thresholds-form";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -21,42 +23,55 @@ export default async function SettingsPage() {
     redirect("/dashboard");
   }
 
-  const [locations, categories, units, users, departments] = await Promise.all([
+  const [locations, categories, units, users, departments, appSettings] = await Promise.all([
     prisma.location.findMany({ orderBy: { name: "asc" } }),
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     prisma.unit.findMany({ orderBy: { name: "asc" } }),
-    prisma.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true } }),
+    prisma.user.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
+    }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
+    getAppSettings(),
   ]);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Settings"
-        description="Manage system configuration — Admin access only"
-      />
+      <PageHeader title="Settings" description="Manage system configuration — Admin access only" />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ExceptionThresholdsForm
+          exceptionStaleSubmitDays={appSettings.exceptionStaleSubmitDays}
+          exceptionOverdueReceiveDays={appSettings.exceptionOverdueReceiveDays}
+          exceptionMinLowStockBranches={appSettings.exceptionMinLowStockBranches}
+        />
+
         {/* ── Locations ── */}
-        <Card className="border border-border shadow-none">
+        <Card className="border-border border shadow-none">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-primary" />
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <MapPin className="text-primary h-4 w-4" />
               Locations ({locations.length})
             </CardTitle>
             <CardDescription>Aqila&apos;s branches and service vehicles</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-border">
+            <div className="divide-border divide-y">
               {locations.map((loc) => (
-                <div key={loc.id} className="px-6 py-3 flex items-center justify-between gap-3">
+                <div key={loc.id} className="flex items-center justify-between gap-3 px-6 py-3">
                   <div>
-                    <div className="font-medium text-sm text-foreground">{loc.name}</div>
-                    <div className="text-xs text-muted-foreground">{loc.address ?? loc.type}</div>
+                    <div className="text-foreground text-sm font-medium">{loc.name}</div>
+                    <div className="text-muted-foreground text-xs">{loc.address ?? loc.type}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-[10px]">{loc.type}</Badge>
-                    {!loc.isActive && <Badge variant="destructive" className="text-[10px]">Inactive</Badge>}
+                    <Badge variant="secondary" className="text-[10px]">
+                      {loc.type}
+                    </Badge>
+                    {!loc.isActive && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        Inactive
+                      </Badge>
+                    )}
                   </div>
                 </div>
               ))}
@@ -65,25 +80,31 @@ export default async function SettingsPage() {
         </Card>
 
         {/* ── Users ── */}
-        <Card className="border border-border shadow-none">
+        <Card className="border-border border shadow-none">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <Users className="h-4 w-4 text-primary" />
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <Users className="text-primary h-4 w-4" />
               Users ({users.length})
             </CardTitle>
             <CardDescription>System accounts and role assignments</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-border max-h-64 overflow-y-auto">
+            <div className="divide-border max-h-64 divide-y overflow-y-auto">
               {users.map((user) => (
-                <div key={user.id} className="px-6 py-3 flex items-center justify-between gap-3">
+                <div key={user.id} className="flex items-center justify-between gap-3 px-6 py-3">
                   <div>
-                    <div className="font-medium text-sm text-foreground">{user.name ?? "—"}</div>
-                    <div className="text-xs text-muted-foreground">{user.email}</div>
+                    <div className="text-foreground text-sm font-medium">{user.name ?? "—"}</div>
+                    <div className="text-muted-foreground text-xs">{user.email}</div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="secondary" className="text-[10px] capitalize">{user.role.toLowerCase()}</Badge>
-                    {!user.isActive && <Badge variant="destructive" className="text-[10px]">Inactive</Badge>}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge variant="secondary" className="text-[10px] capitalize">
+                      {user.role.toLowerCase()}
+                    </Badge>
+                    {!user.isActive && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        Inactive
+                      </Badge>
+                    )}
                   </div>
                 </div>
               ))}
@@ -92,21 +113,21 @@ export default async function SettingsPage() {
         </Card>
 
         {/* ── Categories ── */}
-        <Card className="border border-border shadow-none">
+        <Card className="border-border border shadow-none">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <Tag className="h-4 w-4 text-primary" />
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <Tag className="text-primary h-4 w-4" />
               Product Categories ({categories.length})
             </CardTitle>
             <CardDescription>Product taxonomy for inventory organisation</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-border">
+            <div className="divide-border divide-y">
               {categories.map((cat) => (
                 <div key={cat.id} className="px-6 py-3">
-                  <div className="font-medium text-sm text-foreground">{cat.name}</div>
+                  <div className="text-foreground text-sm font-medium">{cat.name}</div>
                   {cat.description && (
-                    <div className="text-xs text-muted-foreground">{cat.description}</div>
+                    <div className="text-muted-foreground text-xs">{cat.description}</div>
                   )}
                 </div>
               ))}
@@ -116,10 +137,10 @@ export default async function SettingsPage() {
 
         {/* ── Units + Departments ── */}
         <div className="space-y-6">
-          <Card className="border border-border shadow-none">
+          <Card className="border-border border shadow-none">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Ruler className="h-4 w-4 text-primary" />
+              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                <Ruler className="text-primary h-4 w-4" />
                 Units of Measure ({units.length})
               </CardTitle>
             </CardHeader>
@@ -134,10 +155,10 @@ export default async function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="border border-border shadow-none">
+          <Card className="border-border border shadow-none">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Bell className="h-4 w-4 text-primary" />
+              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                <Bell className="text-primary h-4 w-4" />
                 Departments ({departments.length})
               </CardTitle>
             </CardHeader>

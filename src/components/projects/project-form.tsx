@@ -17,10 +17,11 @@ import { cn } from "@/lib/utils";
 
 interface ProjectFormProps {
   locations: { id: string; name: string }[];
+  customers: { id: string; name: string }[];
   className?: string;
 }
 
-export function ProjectForm({ locations, className }: ProjectFormProps) {
+export function ProjectForm({ locations, customers, className }: ProjectFormProps) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -36,6 +37,7 @@ export function ProjectForm({ locations, className }: ProjectFormProps) {
       locationId: locations[0]?.id ?? "",
       clientName: "",
       clientPhone: "",
+      customerId: "",
     },
   });
 
@@ -109,6 +111,29 @@ export function ProjectForm({ locations, className }: ProjectFormProps) {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="customerId">Customer record (optional)</Label>
+        <NativeSelect
+          id="customerId"
+          className="w-full"
+          {...register("customerId")}
+          aria-invalid={!!errors.customerId}
+        >
+          <NativeSelectOption value="">— Ad-hoc client (use fields below) —</NativeSelectOption>
+          {customers.map((c) => (
+            <NativeSelectOption key={c.id} value={c.id}>
+              {c.name}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        {errors.customerId && (
+          <p className="text-destructive text-xs">{String(errors.customerId.message)}</p>
+        )}
+        <p className="text-muted-foreground text-xs">
+          Linking a customer fills client name/phone when those fields are left empty.
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

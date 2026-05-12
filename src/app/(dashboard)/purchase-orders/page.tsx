@@ -61,7 +61,7 @@ export default async function PurchaseOrdersPage({ searchParams }: PageProps) {
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: {
-        supplier: { select: { name: true } },
+        supplier: { select: { id: true, name: true } },
         location: { select: { name: true } },
         createdBy: { select: { name: true } },
         _count: { select: { items: true } },
@@ -287,7 +287,14 @@ export default async function PurchaseOrdersPage({ searchParams }: PageProps) {
                           {po.poNumber}
                         </Link>
                       </td>
-                      <td className="px-4 py-3">{po.supplier.name}</td>
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/suppliers/${po.supplier.id}`}
+                          className="text-primary hover:underline"
+                        >
+                          {po.supplier.name}
+                        </Link>
+                      </td>
                       <td className="text-muted-foreground px-4 py-3">{po.location.name}</td>
                       <td className="px-4 py-3">
                         <StatusBadge status={po.status} />

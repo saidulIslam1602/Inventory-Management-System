@@ -8,12 +8,14 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { todayOsloPrismaDate } from "@/lib/business-calendar";
+import { isOpsRole } from "@/lib/rbac";
+import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
 
 async function getSelfServiceEmployee() {
   const session = await auth();
   if (!session?.user) return { session: null, emp: null };
-  if (!["STAFF", "MANAGER", "ADMIN"].includes(session.user.role)) {
+  if (!isOpsRole(session.user.role)) {
     return { session, emp: null };
   }
   const emp = await prisma.employee.findUnique({
@@ -24,9 +26,13 @@ async function getSelfServiceEmployee() {
 
 export async function checkInAttendance(): Promise<ActionResult> {
   const { session, emp } = await getSelfServiceEmployee();
-  if (!session?.user) return { success: false, error: "Not authenticated" };
-  if (!emp?.isActive)
-    return { success: false, error: "No active employee profile linked to your account" };
+  if (!session?.user) return { success: false, error: UserMessage.auth.signInRequired };
+  if (!emp?.isActive) {
+    return {
+      success: false,
+      error: UserMessage.api.noEmployeeLinked,
+    };
+  }
 
   const today = todayOsloPrismaDate();
   const now = new Date();
@@ -51,23 +57,30 @@ export async function checkInAttendance(): Promise<ActionResult> {
         data: { checkIn: now, status: "PRESENT" },
       });
     } else {
-      return { success: false, error: "You already checked in today" };
+      return { success: false, error: "You have already checked in today." };
     }
 
     revalidatePath("/me");
     revalidatePath("/dashboard");
     revalidatePath("/employees/attendance");
-    return { success: true, data: undefined, message: "Checked in" };
+    return { success: true, data: undefined, message: "You are checked in." };
   } catch {
-    return { success: false, error: "Could not record check-in" };
+    return {
+      success: false,
+      error: "Check-in could not be recorded. Please try again.",
+    };
   }
 }
 
 export async function checkOutAttendance(): Promise<ActionResult> {
   const { session, emp } = await getSelfServiceEmployee();
-  if (!session?.user) return { success: false, error: "Not authenticated" };
-  if (!emp?.isActive)
-    return { success: false, error: "No active employee profile linked to your account" };
+  if (!session?.user) return { success: false, error: UserMessage.auth.signInRequired };
+  if (!emp?.isActive) {
+    return {
+      success: false,
+      error: UserMessage.api.noEmployeeLinked,
+    };
+  }
 
   const today = todayOsloPrismaDate();
   const now = new Date();
@@ -78,10 +91,10 @@ export async function checkOutAttendance(): Promise<ActionResult> {
     });
 
     if (!existing?.checkIn) {
-      return { success: false, error: "Check in first" };
+      return { success: false, error: "Check in before checking out." };
     }
     if (existing.checkOut) {
-      return { success: false, error: "You already checked out today" };
+      return { success: false, error: "You have already checked out today." };
     }
 
     const hours = (now.getTime() - existing.checkIn.getTime()) / 3_600_000;
@@ -98,8 +111,11 @@ export async function checkOutAttendance(): Promise<ActionResult> {
     revalidatePath("/me");
     revalidatePath("/dashboard");
     revalidatePath("/employees/attendance");
-    return { success: true, data: undefined, message: "Checked out" };
+    return { success: true, data: undefined, message: "You are checked out." };
   } catch {
-    return { success: false, error: "Could not record check-out" };
+    return {
+      success: false,
+      error: "Check-out could not be recorded. Please try again.",
+    };
   }
 }

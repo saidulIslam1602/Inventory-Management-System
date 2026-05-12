@@ -3,12 +3,13 @@
  * Used at the top of each module page.
  */
 
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface PageHeaderProps {
   title: string;
-  description?: string;
-  actions?: React.ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
   className?: string;
 }
 
@@ -24,10 +25,10 @@ export function PageHeader({ title, description, actions, className }: PageHeade
         <h1 className="text-foreground text-2xl font-semibold leading-tight tracking-tight sm:text-[1.75rem]">
           {title}
         </h1>
-        {description && (
-          <p className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
+        {description != null && description !== "" && (
+          <div className="text-muted-foreground mt-2 max-w-2xl text-sm leading-relaxed">
             {description}
-          </p>
+          </div>
         )}
       </div>
       {actions && (

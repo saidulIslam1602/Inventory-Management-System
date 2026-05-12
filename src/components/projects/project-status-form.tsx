@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ProjectStatus } from "@prisma/client";
 import { updateProjectStatus } from "@/lib/actions/projects";
+import { UserMessage } from "@/lib/user-messages";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -34,7 +35,7 @@ export function ProjectStatusForm({ projectId, currentStatus }: ProjectStatusFor
     const result = await updateProjectStatus({ projectId, status });
     setPending(false);
     if (!result.success) {
-      setError(result.error ?? "Could not update status.");
+      setError(result.error ?? UserMessage.error.generic);
       return;
     }
     router.refresh();

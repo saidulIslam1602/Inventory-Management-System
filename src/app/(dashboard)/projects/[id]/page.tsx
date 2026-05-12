@@ -37,6 +37,7 @@ export default async function ProjectDetailPage({ params }: Props) {
     where: { id },
     include: {
       location: { select: { name: true } },
+      customer: { select: { id: true, name: true, phone: true, email: true } },
       employees: {
         include: {
           employee: {
@@ -93,11 +94,25 @@ export default async function ProjectDetailPage({ params }: Props) {
             <CardTitle className="text-base font-semibold">Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 gap-y-1">
               <StatusBadge status={project.status} />
-              {project.clientName && (
-                <span className="text-muted-foreground">Client: {project.clientName}</span>
-              )}
+              {project.customer ? (
+                <span className="text-muted-foreground text-sm">
+                  Customer:{" "}
+                  <Link
+                    href={`/customers/${project.customer.id}`}
+                    className="text-primary font-medium hover:underline"
+                  >
+                    {project.customer.name}
+                  </Link>
+                </span>
+              ) : null}
+              {project.clientName ? (
+                <span className="text-muted-foreground text-sm">
+                  {project.customer ? "Contact on project: " : "Client: "}
+                  {project.clientName}
+                </span>
+              ) : null}
             </div>
             {project.description && (
               <p className="text-muted-foreground whitespace-pre-wrap">{project.description}</p>

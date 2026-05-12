@@ -5,8 +5,17 @@
  */
 
 import type { Metadata } from "next";
-import { Package, ShoppingCart, FolderKanban, AlertTriangle, ArrowUpDown } from "lucide-react";
+import Link from "next/link";
+import {
+  Building2,
+  Package,
+  ShoppingCart,
+  FolderKanban,
+  AlertTriangle,
+  ArrowUpDown,
+} from "lucide-react";
 import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { StatsCard } from "@/components/shared/stats-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -23,6 +32,7 @@ import {
   parseChartPeriod,
 } from "@/lib/chart-period";
 import { ChartPeriodToolbar } from "@/components/shared/chart-period-toolbar";
+import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -196,6 +206,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   const { mode, offset } = parseChartPeriod(sp);
   const data = await getDashboardData(mode, offset);
+  const session = await auth();
+  const showManagerHub = ["ADMIN", "MANAGER", "VIEWER"].includes(session?.user?.role ?? "");
 
   return (
     <div className="space-y-6">
@@ -208,6 +220,16 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           year: "numeric",
           timeZone: BUSINESS_TIME_ZONE,
         })}`}
+        actions={
+          showManagerHub ? (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/manager">
+                <Building2 className="mr-1.5 h-4 w-4" />
+                Manager hub
+              </Link>
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* ── KPI Cards ── */}

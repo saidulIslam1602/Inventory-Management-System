@@ -3,42 +3,52 @@
  */
 
 import { NextResponse } from "next/server";
-import { UserRole } from "@prisma/client";
 import { format } from "date-fns";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { searchParamFirst } from "@/lib/search-params";
 import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
-import { USER_ROLES, buildEmployeeWhere } from "@/lib/queries/employees-list";
+import { buildEmployeeWhere } from "@/lib/queries/employees-list";
+import { employeesExportQuerySchema } from "@/lib/validations/export-queries";
+import { UserMessage } from "@/lib/user-messages";
+import { canExportEmployeesDirectoryCsv } from "@/lib/rbac";
 
 const EXPORT_CAP = 50_000;
 
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: UserMessage.api.unauthorized }, { status: 401 });
   }
-  if (session.user.role === "STAFF") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!canExportEmployeesDirectoryCsv(session.user.role)) {
+    return NextResponse.json({ error: UserMessage.api.forbidden }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);
   const pick = (k: string) => searchParamFirst(searchParams.get(k) ?? undefined);
 
-  const roleRaw = pick("role");
-  const role =
-    roleRaw && (USER_ROLES as readonly string[]).includes(roleRaw)
-      ? (roleRaw as UserRole)
-      : undefined;
+  const filters = employeesExportQuerySchema.safeParse({
+    role: pick("role"),
+    employment: pick("employment"),
+    department: pick("department"),
+    q: pick("q"),
+  });
+  if (!filters.success) {
+    return NextResponse.json(
+      {
+        error: filters.error.issues[0]?.message ?? UserMessage.api.invalidExportFilters,
+      },
+      { status: 400 }
+    );
+  }
 
-  const employment = pick("employment");
-  const empMode = employment === "active" || employment === "inactive" ? employment : undefined;
+  const { role, employment: empMode, department, q } = filters.data;
 
   const where = buildEmployeeWhere({
-    departmentId: pick("department"),
+    departmentId: department,
     role,
     employment: empMode,
-    q: pick("q"),
+    q,
   });
 
   const rows = await prisma.employee.findMany({

@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Building2,
   UserCircle2,
   LayoutDashboard,
   Package,
@@ -18,6 +19,7 @@ import {
   ShoppingCart,
   Users,
   FolderKanban,
+  Contact,
   BarChart3,
   Settings,
   Zap,
@@ -39,8 +41,9 @@ import { cn } from "@/lib/utils";
 import type { NavItem } from "@/types";
 import type { UserRole } from "@prisma/client";
 import { logout } from "@/lib/actions/auth";
+import { clearAuthPageCaches } from "@/lib/pwa-cache";
 
-const STAFF_EXCLUDED_HREF = new Set(["/employees", "/reports"]);
+const STAFF_EXCLUDED_HREF = new Set(["/employees", "/reports", "/manager"]);
 
 const NAV_CORE: NavItem[] = [
   {
@@ -52,6 +55,12 @@ const NAV_CORE: NavItem[] = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Manager hub",
+    href: "/manager",
+    icon: Building2,
+    roles: ["ADMIN", "MANAGER", "VIEWER"],
   },
   {
     title: "Inventory",
@@ -79,6 +88,11 @@ const NAV_CORE: NavItem[] = [
     icon: FolderKanban,
   },
   {
+    title: "Customers",
+    href: "/customers",
+    icon: Contact,
+  },
+  {
     title: "Reports",
     href: "/reports",
     icon: BarChart3,
@@ -94,10 +108,11 @@ interface AppSidebarProps {
 export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: AppSidebarProps) {
   const pathname = usePathname();
 
-  const navItems =
-    userRole === "STAFF"
-      ? NAV_CORE.filter((item) => !STAFF_EXCLUDED_HREF.has(item.href))
-      : NAV_CORE;
+  const navItems = NAV_CORE.filter((item) => {
+    if (userRole === "STAFF" && STAFF_EXCLUDED_HREF.has(item.href)) return false;
+    if (item.roles?.length && !item.roles.includes(userRole)) return false;
+    return true;
+  });
 
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
@@ -128,8 +143,8 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
             {navItems.map((item) => {
               const Icon = item.icon!;
               const isActive =
-                item.href === "/me"
-                  ? pathname === "/me"
+                item.href === "/me" || item.href === "/manager"
+                  ? pathname === item.href
                   : pathname === item.href ||
                     (item.href !== "/dashboard" && pathname.startsWith(item.href));
               const badge =
@@ -196,6 +211,7 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
               tooltip="Log out"
               className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent w-full"
               onClick={() => {
+                clearAuthPageCaches();
                 void logout();
               }}
             >

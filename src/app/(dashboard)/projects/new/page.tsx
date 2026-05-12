@@ -15,11 +15,18 @@ export default async function NewProjectPage() {
     redirect("/projects");
   }
 
-  const locations = await prisma.location.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
+  const [locations, customers] = await Promise.all([
+    prisma.location.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.customer.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   if (locations.length === 0) {
     return (
@@ -43,7 +50,7 @@ export default async function NewProjectPage() {
           </Button>
         }
       />
-      <ProjectForm locations={locations} />
+      <ProjectForm locations={locations} customers={customers} />
     </div>
   );
 }

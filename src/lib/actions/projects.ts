@@ -17,6 +17,7 @@ import {
   addProjectMaterialSchema,
   consumeMaterialSchema,
 } from "@/lib/validations/project";
+import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
 
 // ── Generate project code ─────────────────────────────────────────────────────
@@ -34,13 +35,30 @@ async function generateProjectCode(): Promise<string> {
 export async function createProject(formData: unknown): Promise<ActionResult<{ id: string }>> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = projectSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
+
+  let linkedCustomer: { name: string; phone: string | null } | null = null;
+  if (parsed.data.customerId) {
+    linkedCustomer = await prisma.customer.findFirst({
+      where: { id: parsed.data.customerId, isActive: true },
+      select: { name: true, phone: true },
+    });
+    if (!linkedCustomer) {
+      return { success: false, error: "That customer could not be found." };
+    }
+  }
+
+  const clientName = parsed.data.clientName?.trim() || linkedCustomer?.name || null;
+  const clientPhone = parsed.data.clientPhone?.trim() || linkedCustomer?.phone || null;
 
   try {
     const project = await prisma.project.create({
@@ -50,16 +68,24 @@ export async function createProject(formData: unknown): Promise<ActionResult<{ i
         startDate: parsed.data.startDate ?? null,
         endDate: parsed.data.endDate ?? null,
         description: parsed.data.description?.trim() || null,
-        clientName: parsed.data.clientName?.trim() || null,
-        clientPhone: parsed.data.clientPhone?.trim() || null,
+        customerId: parsed.data.customerId ?? null,
+        clientName,
+        clientPhone,
         projectCode: await generateProjectCode(),
       },
     });
 
     revalidatePath("/projects");
-    return { success: true, data: { id: project.id }, message: "Project created" };
+    return {
+      success: true,
+      data: { id: project.id },
+      message: "Project was created successfully.",
+    };
   } catch {
-    return { success: false, error: "Failed to create project" };
+    return {
+      success: false,
+      error: "The project could not be created. Please try again.",
+    };
   }
 }
 
@@ -68,12 +94,15 @@ export async function createProject(formData: unknown): Promise<ActionResult<{ i
 export async function updateProjectStatus(formData: unknown): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = projectStatusSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   try {
@@ -82,9 +111,12 @@ export async function updateProjectStatus(formData: unknown): Promise<ActionResu
       data: { status: parsed.data.status },
     });
     revalidatePath("/projects");
-    return { success: true, data: undefined };
+    return { success: true, data: undefined, message: "Project status was updated." };
   } catch {
-    return { success: false, error: "Failed to update project" };
+    return {
+      success: false,
+      error: "Project status could not be updated. Please try again.",
+    };
   }
 }
 
@@ -93,33 +125,40 @@ export async function updateProjectStatus(formData: unknown): Promise<ActionResu
 export async function reserveMaterial(formData: unknown): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = addProjectMaterialSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: parsed.error.issues[0]?.message ?? "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const { projectId, productId, reservedQuantity } = parsed.data;
 
   try {
     const project = await prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) return { success: false, error: "Project not found" };
+    if (!project) return { success: false, error: "That project could not be found." };
 
     // Find stock at the project's location
     const stock = await prisma.stock.findFirst({
       where: { productId, locationId: project.locationId },
     });
 
-    if (!stock)
-      return { success: false, error: "No stock found for this product at the project location" };
+    if (!stock) {
+      return {
+        success: false,
+        error: "No stock was found for this product at the project's location.",
+      };
+    }
 
     const availableQty = Number(stock.quantity) - Number(stock.reserved);
     if (availableQty < reservedQuantity) {
       return {
         success: false,
-        error: `Insufficient available stock. Available: ${availableQty}`,
+        error: `Not enough stock is available for this reservation. Available: ${availableQty}.`,
       };
     }
 
@@ -163,9 +202,12 @@ export async function reserveMaterial(formData: unknown): Promise<ActionResult> 
 
     revalidatePath("/projects");
     revalidatePath("/inventory");
-    return { success: true, data: undefined, message: "Material reserved" };
+    return { success: true, data: undefined, message: "Material was reserved for the project." };
   } catch {
-    return { success: false, error: "Failed to reserve material" };
+    return {
+      success: false,
+      error: "Material could not be reserved. Please try again.",
+    };
   }
 }
 
@@ -174,12 +216,15 @@ export async function reserveMaterial(formData: unknown): Promise<ActionResult> 
 export async function consumeMaterial(formData: unknown): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user || !["ADMIN", "MANAGER", "STAFF"].includes(session.user.role)) {
-    return { success: false, error: "Insufficient permissions" };
+    return { success: false, error: UserMessage.permission.denied };
   }
 
   const parsed = consumeMaterialSchema.safeParse(formData);
   if (!parsed.success) {
-    return { success: false, error: "Validation failed" };
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
   }
 
   const { projectMaterialId, usedQuantity } = parsed.data;
@@ -193,13 +238,13 @@ export async function consumeMaterial(formData: unknown): Promise<ActionResult> 
       },
     });
 
-    if (!pm) return { success: false, error: "Project material not found" };
+    if (!pm) return { success: false, error: "That project material line could not be found." };
 
     const remaining = Number(pm.reservedQuantity) - Number(pm.usedQuantity);
     if (usedQuantity > remaining) {
       return {
         success: false,
-        error: `Cannot consume more than reserved (${remaining} remaining)`,
+        error: `You cannot consume more than is reserved (${remaining} remaining).`,
       };
     }
 
@@ -207,7 +252,7 @@ export async function consumeMaterial(formData: unknown): Promise<ActionResult> 
       where: { productId: pm.productId, locationId: pm.project.locationId },
     });
 
-    if (!stock) return { success: false, error: "Stock record not found" };
+    if (!stock) return { success: false, error: "No stock record was found for this line." };
 
     await prisma.$transaction(async (tx) => {
       // Update consumed quantity on project material
@@ -240,8 +285,11 @@ export async function consumeMaterial(formData: unknown): Promise<ActionResult> 
 
     revalidatePath("/projects");
     revalidatePath("/inventory");
-    return { success: true, data: undefined, message: "Consumption recorded" };
+    return { success: true, data: undefined, message: "Consumption was recorded successfully." };
   } catch {
-    return { success: false, error: "Failed to record consumption" };
+    return {
+      success: false,
+      error: "Consumption could not be recorded. Please try again.",
+    };
   }
 }

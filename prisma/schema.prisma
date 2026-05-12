@@ -18,6 +18,7 @@
 //   Project                   — Work orders / installation jobs
 //   ProjectMaterial           — Materials reserved/consumed per project
 //   Notification              — DB-stored alert queue (low-stock, PO events)
+//   PurchaseOrderAuditLog     — Append-only PO status / receipt events (digest + PO detail)
 // ──────────────────────────────────────────────────────────────────────────────
 
 generator client {
@@ -66,6 +67,12 @@ enum POStatus {
   CANCELLED
 }
 
+/// Immutable PO lifecycle entries for digests and audit (status changes + receiving events).
+enum POAuditEventKind {
+  STATUS_CHANGE
+  RECEIPT
+}
+
 enum ProjectStatus {
   PLANNING
   IN_PROGRESS
@@ -84,10 +91,13 @@ enum AttendanceStatus {
 
 enum NotificationType {
   LOW_STOCK
+  PO_SUBMITTED
   PO_APPROVED
+  PO_ORDERED
   PO_RECEIVED
   PROJECT_STARTED
   PROJECT_COMPLETED
+  DAILY_DIGEST
   SYSTEM
 }
 
@@ -104,6 +114,8 @@ model User {
   passwordHash  String?   // Hashed with bcryptjs for credentials provider
   role          UserRole  @default(VIEWER)
   isActive      Boolean   @default(true)
+  /// Per-user notification delivery preferences (instant PO events, daily digest). See `notification-preferences.ts`.
+  notificationPreferences Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -112,6 +124,7 @@ model User {
   employee      Employee?
   stockMovements StockMovement[]
   purchaseOrders PurchaseOrder[]
+  poAuditLogs    PurchaseOrderAuditLog[]
   notifications  Notification[]
 
   @@map("users")
@@ -361,8 +374,29 @@ model PurchaseOrder {
 
   items         PurchaseOrderItem[]
   stockMovements StockMovement[]
+  auditLogs     PurchaseOrderAuditLog[]
 
   @@map("purchase_orders")
+}
+
+/// Append-only log of purchase order status transitions and receiving posts (for digest / traceability).
+model PurchaseOrderAuditLog {
+  id              String           @id @default(cuid())
+  kind            POAuditEventKind
+  fromStatus      POStatus?
+  toStatus        POStatus?
+  details         String?
+  createdAt       DateTime         @default(now())
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder    @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseOrderId, createdAt(sort: Desc)])
+  @@index([createdAt])
+  @@map("purchase_order_audit_logs")
 }
 
 /// A line item within a purchase order
@@ -450,6 +484,27 @@ model Shift {
 }
 
 // ─────────────────────────────────────────────
+// CUSTOMERS (end clients — shared across projects)
+// ─────────────────────────────────────────────
+
+/// Commercial or private end customer; projects may link here instead of ad-hoc client fields.
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects Project[]
+
+  @@map("customers")
+}
+
+// ─────────────────────────────────────────────
 // PROJECTS / WORK ORDERS
 // ─────────────────────────────────────────────
 
@@ -466,6 +521,10 @@ model Project {
   clientPhone String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+
+  /// Optional link to master customer record (supplements ad-hoc clientName/clientPhone).
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   locationId String
   location   Location @relation(fields: [locationId], references: [id])
@@ -514,17 +573,33 @@ model ProjectMaterial {
 // NOTIFICATIONS
 // ─────────────────────────────────────────────
 
+/// Tenant-wide tuning for manager hub exception heuristics (single row id = "default").
+model AppSettings {
+  id                            String   @id @default("default")
+  /// Days in SUBMITTED before flagged in exception queue
+  exceptionStaleSubmitDays      Int      @default(2)
+  /// Days past expected receive (or last update when no expected date) before overdue flag
+  exceptionOverdueReceiveDays     Int      @default(7)
+  /// Minimum distinct locations with a sub–reorder SKU to raise multi-branch low-stock exception
+  exceptionMinLowStockBranches   Int      @default(2)
+  updatedAt                     DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
 /// DB-stored notification queue (low-stock alerts, PO events, etc.)
 model Notification {
-  id        String           @id @default(cuid())
-  type      NotificationType
-  title     String
-  message   String
-  isRead    Boolean          @default(false)
-  createdAt DateTime         @default(now())
+  id         String           @id @default(cuid())
+  type       NotificationType
+  title      String
+  message    String
+  /// Optional in-app deep link (e.g. /purchase-orders/:id).
+  actionHref String?
+  isRead     Boolean          @default(false)
+  createdAt  DateTime         @default(now())
 
-  userId    String
-  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notifications")
 }

@@ -3,32 +3,27 @@
  */
 
 import { NextResponse } from "next/server";
-import { AttendanceStatus } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { searchParamFirst } from "@/lib/search-params";
 import { addCalendarDaysPrismaDate, todayOsloPrismaDate } from "@/lib/business-calendar";
 import { rowsToCsv, withUtf8Bom } from "@/lib/csv";
 import { attendanceLogInclude, buildAttendanceLogWhere } from "@/lib/queries/attendance-log";
+import { attendanceExportQuerySchema } from "@/lib/validations/export-queries";
+import { UserMessage } from "@/lib/user-messages";
+import { canExportAttendanceCsv } from "@/lib/rbac";
 
 const LOOKBACK_DAYS = 90;
 const EXPORT_CAP = 50_000;
-const ATT_STATUSES = Object.values(AttendanceStatus);
 
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: UserMessage.api.unauthorized }, { status: 401 });
   }
-
-  const { searchParams } = new URL(req.url);
-  const pick = (k: string) => searchParamFirst(searchParams.get(k) ?? undefined);
-
-  const statusRaw = pick("status");
-  const status =
-    statusRaw && (ATT_STATUSES as readonly string[]).includes(statusRaw)
-      ? (statusRaw as AttendanceStatus)
-      : undefined;
+  if (!canExportAttendanceCsv(session.user.role)) {
+    return NextResponse.json({ error: UserMessage.api.forbidden }, { status: 403 });
+  }
 
   const since = addCalendarDaysPrismaDate(todayOsloPrismaDate(), -LOOKBACK_DAYS);
 
@@ -40,15 +35,35 @@ export async function GET(req: Request) {
         })
       : null;
   if (session.user.role === "STAFF" && !selfEmp) {
-    return NextResponse.json({ error: "No employee profile" }, { status: 403 });
+    return NextResponse.json({ error: UserMessage.api.noEmployeeLinked }, { status: 403 });
   }
+
+  const { searchParams } = new URL(req.url);
+  const pick = (k: string) => searchParamFirst(searchParams.get(k) ?? undefined);
+
+  const filters = attendanceExportQuerySchema.safeParse({
+    status: pick("status"),
+    q: session.user.role === "STAFF" ? undefined : pick("q"),
+    from: pick("from"),
+    to: pick("to"),
+  });
+  if (!filters.success) {
+    return NextResponse.json(
+      {
+        error: filters.error.issues[0]?.message ?? UserMessage.api.invalidExportFilters,
+      },
+      { status: 400 }
+    );
+  }
+
+  const { status, q: qFilter, from: fromFilter, to: toFilter } = filters.data;
 
   const where = buildAttendanceLogWhere({
     since,
     status,
-    q: session.user.role === "STAFF" ? undefined : pick("q"),
-    dateFrom: pick("from"),
-    dateTo: pick("to"),
+    q: qFilter,
+    dateFrom: fromFilter,
+    dateTo: toFilter,
     employeeId: selfEmp?.id,
   });
 

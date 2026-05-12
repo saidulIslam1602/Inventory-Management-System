@@ -184,3 +184,106 @@
     @apply outline-ring outline-2 outline-offset-2;
   }
 }
+
+/* ── App shell: professional mesh + pattern (dashboard & auth) ─────────── */
+.app-dashboard-backdrop {
+  position: relative;
+  background-color: transparent;
+  background-image:
+    radial-gradient(ellipse 110% 75% at 92% -18%, oklch(0.5 0.14 150 / 0.09), transparent 54%),
+    radial-gradient(ellipse 65% 50% at -8% 38%, oklch(0.42 0.06 250 / 0.055), transparent 52%),
+    radial-gradient(ellipse 55% 42% at 72% 105%, oklch(0.52 0.1 165 / 0.045), transparent 58%),
+    linear-gradient(180deg, oklch(0.97 0.01 150 / 0.55) 0%, transparent 38%);
+}
+
+.app-dashboard-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/brand/ims-grid-light.svg");
+  background-size: 120px 120px;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.dark .app-dashboard-backdrop {
+  background-image:
+    radial-gradient(ellipse 100% 70% at 88% -12%, oklch(0.55 0.14 150 / 0.14), transparent 52%),
+    radial-gradient(ellipse 55% 48% at -10% 42%, oklch(0.4 0.07 250 / 0.11), transparent 48%),
+    linear-gradient(180deg, oklch(0.16 0.012 250 / 0.85) 0%, transparent 45%);
+}
+
+.dark .app-dashboard-backdrop::after {
+  background-image: url("/brand/ims-grid.svg");
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-login-brand-panel {
+    animation: login-panel-glow 14s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes login-panel-glow {
+  0% {
+    filter: saturate(1) brightness(1);
+  }
+  100% {
+    filter: saturate(1.05) brightness(1.02);
+  }
+}
+
+.app-login-brand-panel {
+  position: relative;
+  overflow: hidden;
+  background-color: oklch(0.16 0.018 250);
+  background-image:
+    radial-gradient(ellipse 90% 80% at 80% 15%, oklch(0.45 0.12 150 / 0.35), transparent 55%),
+    radial-gradient(ellipse 70% 60% at 10% 85%, oklch(0.35 0.08 250 / 0.45), transparent 50%),
+    linear-gradient(165deg, oklch(0.14 0.02 250) 0%, oklch(0.18 0.015 220) 100%);
+}
+
+.app-login-brand-panel::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  background-image: url("/brand/ims-circuit.svg");
+  background-size: 420px 420px;
+  background-position: 60% 30%;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.app-login-brand-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/brand/ims-grid.svg");
+  background-size: 100px 100px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.app-login-form-side {
+  position: relative;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 20% -10%, oklch(0.5 0.12 150 / 0.06), transparent 52%),
+    radial-gradient(ellipse 60% 40% at 100% 50%, oklch(0.48 0.06 250 / 0.04), transparent 55%);
+}
+
+.app-login-form-side::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/brand/ims-grid-light.svg");
+  background-size: 96px 96px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+/* Subtle lift for primary content cards on patterned background */
+@layer components {
+  .app-content-surface {
+    @apply duration-200 motion-safe:transition-[box-shadow,transform];
+  }
+}

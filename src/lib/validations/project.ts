@@ -11,6 +11,10 @@ export const projectSchema = z.object({
   endDate: z.preprocess(emptyToUndefined, z.coerce.date().optional()),
   clientName: z.string().optional(),
   clientPhone: z.string().optional(),
+  customerId: z.preprocess(
+    (v) => (v === "" || v == null ? undefined : v),
+    z.string().cuid("Invalid customer").optional()
+  ),
 });
 
 export type ProjectInput = z.infer<typeof projectSchema>;
