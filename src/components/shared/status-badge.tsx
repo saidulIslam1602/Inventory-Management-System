@@ -46,6 +46,10 @@ const STATUS_MAP: Record<string, { label: string; className: string }> = {
     className: "bg-muted text-muted-foreground border-border",
   },
   RECEIPT: { label: "Receipt", className: "bg-primary/10 text-primary border-primary/20" },
+  ESCALATION_NOTE: {
+    label: "Escalation",
+    className: "bg-amber-500/12 text-amber-950 border-amber-500/25 dark:text-amber-200",
+  },
 };
 
 interface StatusBadgeProps {

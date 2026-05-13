@@ -39,9 +39,11 @@ export async function updateMyNotificationPreferences(prefs: unknown): Promise<A
       poApproved: instant.poApproved !== false,
       poOrdered: instant.poOrdered !== false,
       poReceived: instant.poReceived !== false,
+      poApprovalEscalation: instant.poApprovalEscalation !== false,
     },
     digestDaily: prefsIn.digestDaily === true,
     emailDigestDaily: prefsIn.emailDigestDaily === true,
+    emailApprovalEscalation: prefsIn.emailApprovalEscalation === true,
   };
 
   await prisma.user.update({

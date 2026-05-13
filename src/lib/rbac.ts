@@ -31,6 +31,11 @@ export function canAccessAdminSettings(role: string | undefined): boolean {
   return role === "ADMIN";
 }
 
+/** Org reference data at `/settings` (locations, users list, taxonomy). STAFF uses field flows only. */
+export function canAccessSettingsPage(role: string | undefined): boolean {
+  return role === "ADMIN" || role === "MANAGER" || role === "VIEWER";
+}
+
 /** True if this pathname is blocked for STAFF at the edge (pages still enforce server-side). */
 export function staffBlockedPathname(pathname: string): boolean {
   return (
@@ -38,6 +43,25 @@ export function staffBlockedPathname(pathname: string): boolean {
     pathname.startsWith("/reports") ||
     pathname.startsWith("/manager")
   );
+}
+
+/** Write/edit flows VIEWER cannot use (reads stay on list/detail pages). */
+export function viewerBlockedWritePathname(pathname: string): boolean {
+  if (pathname === "/inventory/receive" || pathname === "/inventory/new") {
+    return true;
+  }
+  if (/^\/inventory\/[^/]+\/edit$/.test(pathname)) {
+    return true;
+  }
+  if (
+    pathname === "/purchase-orders/new" ||
+    pathname === "/projects/new" ||
+    pathname === "/customers/new" ||
+    /^\/customers\/[^/]+\/edit$/.test(pathname)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**

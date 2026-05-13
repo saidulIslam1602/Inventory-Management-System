@@ -18,8 +18,10 @@ export function PortalNotificationPreferencesForm({
     poApproved: boolean;
     poOrdered: boolean;
     poReceived: boolean;
+    poApprovalEscalation: boolean;
     digestDaily: boolean;
     emailDigestDaily: boolean;
+    emailApprovalEscalation: boolean;
   };
 }) {
   const router = useRouter();
@@ -27,8 +29,12 @@ export function PortalNotificationPreferencesForm({
   const [poApproved, setPoApproved] = useState(initial.poApproved);
   const [poOrdered, setPoOrdered] = useState(initial.poOrdered);
   const [poReceived, setPoReceived] = useState(initial.poReceived);
+  const [poApprovalEscalation, setPoApprovalEscalation] = useState(initial.poApprovalEscalation);
   const [digestDaily, setDigestDaily] = useState(initial.digestDaily);
   const [emailDigestDaily, setEmailDigestDaily] = useState(initial.emailDigestDaily);
+  const [emailApprovalEscalation, setEmailApprovalEscalation] = useState(
+    initial.emailApprovalEscalation
+  );
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -44,9 +50,11 @@ export function PortalNotificationPreferencesForm({
         poApproved,
         poOrdered,
         poReceived,
+        poApprovalEscalation,
       },
       digestDaily,
       emailDigestDaily,
+      emailApprovalEscalation,
     });
     setPending(false);
     if (!r.success) {
@@ -135,6 +143,20 @@ export function PortalNotificationPreferencesForm({
                 </span>
               </span>
             </label>
+            <label className="flex cursor-pointer items-start gap-3 text-sm">
+              <Checkbox
+                checked={poApprovalEscalation}
+                onCheckedChange={(v) => setPoApprovalEscalation(v === true)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Approval backlog reminders</span>
+                <span className="text-muted-foreground block text-xs">
+                  When a PO stays awaiting approval past the org threshold (same as manager hub
+                  exceptions — scheduled job, at most about once per PO per day in-app).
+                </span>
+              </span>
+            </label>
           </div>
           <div className="border-border/60 border-t pt-4">
             <label className="flex cursor-pointer items-start gap-3 text-sm">
@@ -162,6 +184,20 @@ export function PortalNotificationPreferencesForm({
                 <span className="text-muted-foreground block text-xs">
                   Same snapshot as above, sent once per day to your account email when SMTP is
                   configured (scheduled server job — see ops runbook / CRON_SECRET).
+                </span>
+              </span>
+            </label>
+            <label className="mt-3 flex cursor-pointer items-start gap-3 text-sm">
+              <Checkbox
+                checked={emailApprovalEscalation}
+                onCheckedChange={(v) => setEmailApprovalEscalation(v === true)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium">Email approval backlog reminders</span>
+                <span className="text-muted-foreground block text-xs">
+                  Separate message listing POs past the threshold (managers / admins; same cron as
+                  digest when SMTP is set; about once per 22h per user).
                 </span>
               </span>
             </label>

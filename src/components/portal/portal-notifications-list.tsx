@@ -24,7 +24,13 @@ export type PortalNotificationItem = {
 type CategoryFilter = "all" | "po" | "digest" | "other";
 
 function categoryForType(t: NotificationType): CategoryFilter {
-  if (t === "PO_SUBMITTED" || t === "PO_APPROVED" || t === "PO_ORDERED" || t === "PO_RECEIVED") {
+  if (
+    t === "PO_SUBMITTED" ||
+    t === "PO_APPROVED" ||
+    t === "PO_ORDERED" ||
+    t === "PO_RECEIVED" ||
+    t === "PO_APPROVAL_OVERDUE"
+  ) {
     return "po";
   }
   if (t === "DAILY_DIGEST") return "digest";

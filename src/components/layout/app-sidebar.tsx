@@ -42,6 +42,7 @@ import type { NavItem } from "@/types";
 import type { UserRole } from "@prisma/client";
 import { logout } from "@/lib/actions/auth";
 import { clearAuthPageCaches } from "@/lib/pwa-cache";
+import { canAccessSettingsPage } from "@/lib/rbac";
 
 const STAFF_EXCLUDED_HREF = new Set(["/employees", "/reports", "/manager"]);
 
@@ -180,26 +181,28 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* ── Settings group ── */}
-        <SidebarGroup className="mt-auto">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={<Link href="/settings" />}
-                isActive={pathname.startsWith("/settings")}
-                tooltip="Settings"
-                className={cn(
-                  "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
-                  pathname.startsWith("/settings") &&
-                    "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
-                )}
-              >
-                <Settings className="h-4 w-4 shrink-0" />
-                <span>Settings</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
+        {/* ── Settings (reference data; admin-only edits on page) ── */}
+        {canAccessSettingsPage(userRole) ? (
+          <SidebarGroup className="mt-auto">
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/settings" />}
+                  isActive={pathname.startsWith("/settings")}
+                  tooltip="Settings"
+                  className={cn(
+                    "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
+                    pathname.startsWith("/settings") &&
+                      "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
+                  )}
+                >
+                  <Settings className="h-4 w-4 shrink-0" />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
 
       {/* ── Footer: log out + version ── */}

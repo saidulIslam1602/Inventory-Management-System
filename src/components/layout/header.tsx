@@ -20,7 +20,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Suspense } from "react";
 import { GlobalSearchCommand } from "@/components/layout/global-search-command";
+import { StaffCmdPaletteRouteRecorder } from "@/components/layout/staff-cmd-palette-route-recorder";
 import { HeaderNotificationsMenu } from "@/components/layout/header-notifications-menu";
 
 // Map route paths to human-readable breadcrumb labels
@@ -38,6 +40,7 @@ const PATH_LABELS: Record<string, string> = {
 
 interface HeaderProps {
   user: {
+    id: string;
     name?: string | null;
     email?: string | null;
     role: string;
@@ -89,7 +92,12 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
       </nav>
 
       {/* Quick search */}
-      <GlobalSearchCommand />
+      {user.role === "STAFF" && user.id ? (
+        <Suspense fallback={null}>
+          <StaffCmdPaletteRouteRecorder userId={user.id} />
+        </Suspense>
+      ) : null}
+      <GlobalSearchCommand staffPaletteUserId={user.role === "STAFF" ? user.id : null} />
 
       {/* Right actions */}
       <div className="flex items-center gap-2">

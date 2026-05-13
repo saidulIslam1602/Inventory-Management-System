@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PurchaseOrderWorkflowButtons } from "@/components/manager/purchase-order-workflow-buttons";
 import { PurchaseOrderReceiveForm } from "@/components/manager/purchase-order-receive-form";
+import { PurchaseOrderEscalationNoteForm } from "@/components/manager/purchase-order-escalation-note-form";
+import { ReceiveOfflineQueueBanner } from "@/components/inventory/receive-offline-queue-banner";
 import { formatQuantityNbNo } from "@/lib/utils";
 import { BUSINESS_TIME_ZONE } from "@/lib/business-calendar";
 
@@ -61,6 +63,8 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
 
   return (
     <div className="space-y-6">
+      {canReceive ? <ReceiveOfflineQueueBanner userId={session.user.id} /> : null}
+
       <PageHeader
         title={po.poNumber}
         description={
@@ -198,7 +202,7 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold">Activity log</CardTitle>
           <p className="text-muted-foreground text-xs font-normal">
-            Status changes and receiving events (used for daily digest summaries).
+            Status changes, receiving events, and manager escalation notes (append-only).
           </p>
         </CardHeader>
         <CardContent className="p-0">
@@ -235,7 +239,9 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
                         <StatusBadge status={row.kind} />
                       </td>
                       <td className="text-muted-foreground px-4 py-2.5 font-mono text-xs">
-                        {(row.fromStatus ?? "—") + " → " + (row.toStatus ?? "—")}
+                        {row.kind === "ESCALATION_NOTE"
+                          ? "—"
+                          : (row.fromStatus ?? "—") + " → " + (row.toStatus ?? "—")}
                       </td>
                       <td className="text-muted-foreground max-w-xs px-4 py-2.5 text-xs">
                         {row.details ?? "—"}
@@ -252,6 +258,17 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
         </CardContent>
       </Card>
 
+      {canManage ? (
+        <PurchaseOrderEscalationNoteForm
+          purchaseOrderId={po.id}
+          lines={po.items.map((it) => ({
+            orderedQuantity: it.orderedQuantity,
+            receivedQuantity: it.receivedQuantity,
+            product: { sku: it.product.sku },
+          }))}
+        />
+      ) : null}
+
       {receiving && canReceive && (
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
@@ -263,6 +280,8 @@ export default async function PurchaseOrderDetailPage({ params }: Props) {
           <CardContent>
             <PurchaseOrderReceiveForm
               purchaseOrderId={po.id}
+              offlineQueueUserId={session.user.id}
+              offlineQueuePoLabel={po.poNumber}
               lines={receiving.map((l) => ({
                 id: l.id,
                 orderedQuantity: Number(l.orderedQuantity),

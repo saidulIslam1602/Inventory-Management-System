@@ -39,7 +39,7 @@ export interface NavItem {
 // ── API response wrapper ──────────────────────────────────────────────────────
 
 export type ActionResult<T = void> =
-  | { success: true; data: T; message?: string }
+  | { success: true; data: T; message?: string; offlineQueued?: boolean }
   | { success: false; error: string };
 
 // ── Table / pagination ────────────────────────────────────────────────────────

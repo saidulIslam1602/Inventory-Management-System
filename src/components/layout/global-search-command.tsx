@@ -1,8 +1,18 @@
 "use client";
 
-import * as React from "react";
-import { useRouter } from "next/navigation";
-import { Search, Package, ShoppingCart, FolderKanban, Users, Truck, Contact } from "lucide-react";
+import React, { useSyncExternalStore } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import {
+  Search,
+  Package,
+  ShoppingCart,
+  FolderKanban,
+  Users,
+  Truck,
+  Contact,
+  Bookmark,
+  Clock,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -14,6 +24,32 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import type { StaffCmdPaletteEntry } from "@/lib/staff-cmd-palette-storage";
+import {
+  isStaffCmdHrefPinned,
+  readStaffCmdPins,
+  readStaffCmdRecents,
+  staffCmdPaletteHref,
+  staffCmdRouteLabel,
+  subscribeStaffCmdPalette,
+  toggleStaffCmdPin,
+} from "@/lib/staff-cmd-palette-storage";
+
+const EMPTY_STAFF_BOARD: { pins: StaffCmdPaletteEntry[]; recents: StaffCmdPaletteEntry[] } = {
+  pins: [],
+  recents: [],
+};
+
+function useStaffCmdBoard(userId: string | undefined) {
+  return useSyncExternalStore(
+    (cb) => (userId ? subscribeStaffCmdPalette(userId, cb) : () => {}),
+    () =>
+      userId
+        ? { pins: readStaffCmdPins(userId), recents: readStaffCmdRecents(userId) }
+        : EMPTY_STAFF_BOARD,
+    () => EMPTY_STAFF_BOARD
+  );
+}
 
 type SearchPayload = {
   products: { id: string; name: string; sku: string; href: string }[];
@@ -35,12 +71,27 @@ type SearchPayload = {
   }[];
 };
 
-export function GlobalSearchCommand() {
+export function GlobalSearchCommand({
+  staffPaletteUserId,
+}: {
+  staffPaletteUserId?: string | null;
+} = {}) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [data, setData] = React.useState<SearchPayload | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const staffBoard = useStaffCmdBoard(staffPaletteUserId ?? undefined);
+  const browsingStaffPalette = Boolean(staffPaletteUserId) && query.trim().length < 2;
+  const currentPaletteHref = staffPaletteUserId ? staffCmdPaletteHref(pathname, searchParams) : "";
+  const currentPaletteLabel = staffPaletteUserId
+    ? staffCmdRouteLabel(pathname, searchParams)
+    : { title: "" };
+  const currentIsPinned = staffPaletteUserId
+    ? isStaffCmdHrefPinned(staffPaletteUserId, currentPaletteHref)
+    : false;
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -89,7 +140,9 @@ export function GlobalSearchCommand() {
 
   const empty =
     query.trim().length < 2
-      ? "Type at least 2 characters…"
+      ? staffPaletteUserId
+        ? "Type at least 2 characters to search the catalog…"
+        : "Type at least 2 characters…"
       : loading
         ? "Searching…"
         : "No matches.";
@@ -130,17 +183,85 @@ export function GlobalSearchCommand() {
           }
         }}
         title="Search"
-        description="Find products, POs, suppliers, customers, projects, and employees"
+        description={
+          staffPaletteUserId
+            ? "Pinned & recent (this device), then search products, POs, suppliers, customers, projects"
+            : "Find products, POs, suppliers, customers, projects, and employees"
+        }
         className="sm:max-w-lg"
       >
-        <Command shouldFilter={false} className="overflow-visible">
+        <Command shouldFilter={!browsingStaffPalette} className="overflow-visible">
           <CommandInput
             placeholder="Search SKU, PO, supplier, customer, project, employee…"
             value={query}
             onValueChange={setQuery}
           />
-          <CommandList className="max-h-80">
-            <CommandEmpty>{empty}</CommandEmpty>
+          <CommandList className="max-h-[min(24rem,70vh)]">
+            <CommandEmpty className={browsingStaffPalette ? "hidden" : ""}>{empty}</CommandEmpty>
+            {browsingStaffPalette && staffPaletteUserId ? (
+              <CommandGroup heading="This page">
+                <CommandItem
+                  value="pin-toggle-current"
+                  onSelect={() => {
+                    toggleStaffCmdPin(staffPaletteUserId, {
+                      href: currentPaletteHref,
+                      title: currentPaletteLabel.title,
+                      subtitle: currentPaletteLabel.subtitle,
+                    });
+                  }}
+                >
+                  <Bookmark className="h-4 w-4" />
+                  <span>{currentIsPinned ? "Unpin this page" : "Pin this page"}</span>
+                  <CommandShortcut className="font-normal">Palette</CommandShortcut>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+            {browsingStaffPalette && staffBoard.pins.length > 0 ? (
+              <CommandGroup heading="Pinned">
+                {staffBoard.pins.map((p) => (
+                  <CommandItem
+                    key={`pin-${p.href}`}
+                    value={`pin-${p.href}-${p.title}`}
+                    onSelect={() => go(p.href)}
+                  >
+                    <Bookmark className="h-4 w-4" />
+                    <span className="min-w-0 flex-1">
+                      <span className="truncate font-medium">{p.title}</span>
+                      {p.subtitle ? (
+                        <span className="text-muted-foreground block truncate text-xs">
+                          {p.subtitle}
+                        </span>
+                      ) : null}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+            {browsingStaffPalette && staffBoard.recents.length > 0 ? (
+              <CommandGroup heading="Recent">
+                {staffBoard.recents.map((r, i) => (
+                  <CommandItem
+                    key={`${r.href}:${i}`}
+                    value={`recent-${r.href}-${r.title}-${i}`}
+                    onSelect={() => go(r.href)}
+                  >
+                    <Clock className="h-4 w-4" />
+                    <span className="min-w-0 flex-1">
+                      <span className="truncate font-medium">{r.title}</span>
+                      {r.subtitle ? (
+                        <span className="text-muted-foreground block truncate text-xs">
+                          {r.subtitle}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground block truncate font-mono text-xs">
+                          {r.href}
+                        </span>
+                      )}
+                    </span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
             {data && data.products.length > 0 ? (
               <CommandGroup heading="Products">
                 {data.products.map((p) => (

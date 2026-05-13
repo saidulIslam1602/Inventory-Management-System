@@ -5,8 +5,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { MovementType } from "@prisma/client";
+import { MovementType, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { SavedViewsBar } from "@/components/shared/saved-views-bar";
@@ -37,6 +38,9 @@ type PageProps = {
 };
 
 export default async function MovementsPage({ searchParams }: PageProps) {
+  const session = await auth();
+  const staffPresetScope = session?.user?.role === UserRole.STAFF ? session.user.id : undefined;
+
   const sp = await searchParams;
   const productId = searchParamFirst(sp.product);
   const typeRaw = searchParamFirst(sp.type);
@@ -103,11 +107,28 @@ export default async function MovementsPage({ searchParams }: PageProps) {
     <div className="space-y-6">
       <PageHeader
         title="Stock Movements"
-        description="Immutable audit log — filter, paginate, export CSV, or save views in this browser"
+        description={
+          staffPresetScope
+            ? "Immutable audit log — filter, export CSV, save views (presets tied to your login on this browser)."
+            : "Immutable audit log — filter, paginate, export CSV, or save views in this browser."
+        }
       />
 
       <Suspense fallback={null}>
-        <SavedViewsBar storageId="stock-movements" />
+        <SavedViewsBar
+          storageId="stock-movements"
+          scopeKey={staffPresetScope}
+          hint={
+            staffPresetScope ? (
+              <>
+                Presets keep movement type, location, product id (
+                <span className="font-mono">product</span>), text search, from/to dates and rows per
+                page (<span className="font-mono">pageSize</span>). Pagination (
+                <span className="font-mono">page</span>) is stripped when saving or loading.
+              </>
+            ) : undefined
+          }
+        />
       </Suspense>
 
       <Card className="border-border border shadow-none">

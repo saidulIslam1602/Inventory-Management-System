@@ -3,8 +3,9 @@
  *
  * All /dashboard routes require authentication.
  * Role-based access is enforced per route group:
- *   /settings → ADMIN only
+ *   /settings → ADMIN, MANAGER, VIEWER (STAFF redirected)
  *   /employees, /reports, /manager → STAFF blocked (redirect to /me)
+ *   Mutation-only paths (inventory receive/edit/new, PO/project/customer create, etc.) → VIEWER blocked
  *   All listed prefixes → authentication required
  *
  * Unauthenticated users are redirected to /login.
@@ -12,7 +13,11 @@
 
 import NextAuth from "next-auth";
 import authConfig from "@/lib/auth.config";
-import { canAccessAdminSettings, staffBlockedPathname } from "@/lib/rbac";
+import {
+  canAccessSettingsPage,
+  staffBlockedPathname,
+  viewerBlockedWritePathname,
+} from "@/lib/rbac";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -51,12 +56,16 @@ export default withAuth((req: NextRequest & { auth: { user?: { role?: string } }
   // Enforce admin-only routes
   const role = req.auth.user.role;
 
-  if (pathname.startsWith("/settings") && !canAccessAdminSettings(role)) {
+  if (pathname.startsWith("/settings") && !canAccessSettingsPage(role)) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
   if (role === "STAFF" && staffBlockedPathname(pathname)) {
     return NextResponse.redirect(new URL("/me", req.url));
+  }
+
+  if (role === "VIEWER" && viewerBlockedWritePathname(pathname)) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
   return NextResponse.next();

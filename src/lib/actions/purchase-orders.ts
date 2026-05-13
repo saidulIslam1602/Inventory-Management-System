@@ -11,7 +11,11 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { NotificationType, type POStatus } from "@prisma/client";
-import { purchaseOrderSchema, receiveItemsSchema } from "@/lib/validations/purchase-order";
+import {
+  purchaseOrderSchema,
+  receiveItemsSchema,
+  escalationNoteSchema,
+} from "@/lib/validations/purchase-order";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
 import {
@@ -362,6 +366,54 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
     return {
       success: false,
       error: "Receiving could not be completed. Please try again.",
+    };
+  }
+}
+
+// ── Manager escalation note (append-only audit; ADMIN / MANAGER) ──────────────
+
+export async function addPurchaseOrderEscalationNote(formData: unknown): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
+    return { success: false, error: UserMessage.permission.denied };
+  }
+
+  const parsed = escalationNoteSchema.safeParse(formData);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
+  }
+
+  const { purchaseOrderId, note } = parsed.data;
+
+  try {
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: purchaseOrderId },
+      select: { id: true },
+    });
+    if (!po) {
+      return { success: false, error: "That purchase order could not be found." };
+    }
+
+    await prisma.purchaseOrderAuditLog.create({
+      data: {
+        purchaseOrderId,
+        actorUserId: session.user.id,
+        kind: "ESCALATION_NOTE",
+        details: note,
+      },
+    });
+
+    revalidatePath("/purchase-orders");
+    revalidatePath(`/purchase-orders/${purchaseOrderId}`);
+    revalidatePath("/manager");
+    return { success: true, data: undefined, message: "Note recorded on the PO activity log." };
+  } catch {
+    return {
+      success: false,
+      error: "The note could not be saved. Please try again.",
     };
   }
 }

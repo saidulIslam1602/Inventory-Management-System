@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "POAuditEventKind" ADD VALUE 'ESCALATION_NOTE';

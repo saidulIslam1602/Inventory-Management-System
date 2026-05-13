@@ -2,11 +2,13 @@
  * Optional once-per-window digest notification for users who opt in on /me.
  */
 
-import { subDays, subHours } from "date-fns";
+import { subDays, subHours, differenceInCalendarDays } from "date-fns";
 import { NotificationType, POAuditEventKind } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { getAppSettings } from "@/lib/app-settings";
 import { wantsDigestDaily } from "@/lib/notification-preferences";
 import { buildExceptionQueue } from "@/lib/queries/manager-overview";
+import { findPurchaseOrdersPastApprovalThreshold } from "./approval-escalation";
 
 const DIGEST_COOLDOWN_HOURS = 22;
 
@@ -23,23 +25,30 @@ function formatAuditDigestLine(row: {
     const to = row.toStatus ?? "—";
     return `  – ${num}: ${from} → ${to}`;
   }
+  if (row.kind === "ESCALATION_NOTE") {
+    const tail = row.details?.trim() ? ` — ${row.details.trim()}` : "";
+    return `  – ${num}: escalation note${tail}`;
+  }
   const tail = row.details ? ` — ${row.details}` : "";
   return `  – ${num}: receipt → ${row.toStatus ?? "—"}${tail}`;
 }
 
 export async function buildOpsDigestLines(): Promise<string[]> {
   const since = subDays(new Date(), 1);
-  const [submittedWaiting, movements24h, exceptions, recentPoAudits] = await Promise.all([
-    prisma.purchaseOrder.count({ where: { status: "SUBMITTED" } }),
-    prisma.stockMovement.count({ where: { createdAt: { gte: since } } }),
-    buildExceptionQueue(),
-    prisma.purchaseOrderAuditLog.findMany({
-      where: { createdAt: { gte: since } },
-      orderBy: { createdAt: "desc" },
-      take: 14,
-      include: { purchaseOrder: { select: { poNumber: true } } },
-    }),
-  ]);
+  const [submittedWaiting, movements24h, exceptions, recentPoAudits, overdueApprovals, settings] =
+    await Promise.all([
+      prisma.purchaseOrder.count({ where: { status: "SUBMITTED" } }),
+      prisma.stockMovement.count({ where: { createdAt: { gte: since } } }),
+      buildExceptionQueue(),
+      prisma.purchaseOrderAuditLog.findMany({
+        where: { createdAt: { gte: since } },
+        orderBy: { createdAt: "desc" },
+        take: 14,
+        include: { purchaseOrder: { select: { poNumber: true } } },
+      }),
+      findPurchaseOrdersPastApprovalThreshold(),
+      getAppSettings(),
+    ]);
 
   const lines: string[] = [
     `• ${submittedWaiting} PO(s) currently waiting approval.`,
@@ -51,6 +60,20 @@ export async function buildOpsDigestLines(): Promise<string[]> {
   }
   if (exceptions.length === 0) {
     lines.push("  – (none right now)");
+  }
+
+  if (overdueApprovals.length > 0) {
+    const now = new Date();
+    lines.push(
+      `• POs past approval threshold (${settings.exceptionStaleSubmitDays}d since submit):`
+    );
+    for (const po of overdueApprovals.slice(0, 10)) {
+      const d = Math.max(0, differenceInCalendarDays(now, po.createdAt));
+      lines.push(`  – ${po.poNumber} (${d}d waiting)`);
+    }
+    if (overdueApprovals.length > 10) {
+      lines.push(`  – …and ${overdueApprovals.length - 10} more`);
+    }
   }
 
   if (recentPoAudits.length > 0) {

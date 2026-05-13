@@ -34,3 +34,10 @@ export const receiveItemsSchema = z.object({
 });
 
 export type ReceiveItemsInput = z.infer<typeof receiveItemsSchema>;
+
+export const escalationNoteSchema = z.object({
+  purchaseOrderId: z.string().cuid(),
+  note: z.string().trim().min(1, "Enter a note").max(4000),
+});
+
+export type EscalationNoteInput = z.infer<typeof escalationNoteSchema>;

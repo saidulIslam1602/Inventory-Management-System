@@ -4,7 +4,12 @@
 
 import type { Prisma } from "@prisma/client";
 
-export type InstantPoPreferenceKey = "poSubmitted" | "poApproved" | "poOrdered" | "poReceived";
+export type InstantPoPreferenceKey =
+  | "poSubmitted"
+  | "poApproved"
+  | "poOrdered"
+  | "poReceived"
+  | "poApprovalEscalation";
 
 export type NotificationPreferencesV1 = {
   instant?: Partial<Record<InstantPoPreferenceKey, boolean>>;
@@ -12,10 +17,17 @@ export type NotificationPreferencesV1 = {
   /** When true and SMTP is configured, daily digest is emailed (scheduled job). */
   emailDigestDaily?: boolean;
   /**
+   * When true and SMTP is configured, receive a separate email when POs exceed the org
+   * approval-wait threshold (scheduled job with cooldown — see CRON_SECRET).
+   */
+  emailApprovalEscalation?: boolean;
+  /**
    * Server-managed ISO timestamp; do not send from the client.
    * Throttles duplicate digest emails per user.
    */
   _lastDigestEmailAt?: string;
+  /** Throttles approval-escalation reminder emails per user. */
+  _lastApprovalEscalationEmailAt?: string;
 };
 
 export function parseNotificationPreferences(
@@ -40,4 +52,8 @@ export function wantsDigestDaily(raw: Prisma.JsonValue | null | undefined): bool
 
 export function wantsEmailDigestDaily(raw: Prisma.JsonValue | null | undefined): boolean {
   return parseNotificationPreferences(raw).emailDigestDaily === true;
+}
+
+export function wantsEmailApprovalEscalation(raw: Prisma.JsonValue | null | undefined): boolean {
+  return parseNotificationPreferences(raw).emailApprovalEscalation === true;
 }

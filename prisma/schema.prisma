@@ -67,10 +67,11 @@ enum POStatus {
   CANCELLED
 }
 
-/// Immutable PO lifecycle entries for digests and audit (status changes + receiving events).
+/// Immutable PO lifecycle entries for digests and audit (status changes + receiving events + escalation notes).
 enum POAuditEventKind {
   STATUS_CHANGE
   RECEIPT
+  ESCALATION_NOTE
 }
 
 enum ProjectStatus {
@@ -95,6 +96,7 @@ enum NotificationType {
   PO_APPROVED
   PO_ORDERED
   PO_RECEIVED
+  PO_APPROVAL_OVERDUE
   PROJECT_STARTED
   PROJECT_COMPLETED
   DAILY_DIGEST
