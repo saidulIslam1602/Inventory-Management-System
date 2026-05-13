@@ -5,7 +5,7 @@
  * Parent server page wraps this in Suspense for useSearchParams.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -16,9 +16,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Link from "next/link";
-import { Loader2, AlertCircle, Zap } from "lucide-react";
+import { Loader2, AlertCircle, Zap, Info } from "lucide-react";
 
-export function LoginForm() {
+type LoginFormProps = {
+  /** From NEXTAUTH_URL / AUTH_URL — session cookies must match this browser origin. */
+  expectedAuthOrigin?: string;
+  /** Only in development — show mismatch banner (localhost vs 127.0.0.1, wrong port). */
+  showOriginMismatchHint?: boolean;
+};
+
+export function LoginForm({ expectedAuthOrigin, showOriginMismatchHint = false }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
@@ -32,6 +39,17 @@ export function LoginForm() {
           ? `Sign-in failed (${urlAuthError}). Try again or contact support.`
           : null;
   const [error, setError] = useState<string | null>(null);
+  const [originMismatch, setOriginMismatch] = useState(false);
+  const [browserOrigin, setBrowserOrigin] = useState("");
+
+  useEffect(() => {
+    if (!showOriginMismatchHint || !expectedAuthOrigin) return;
+    queueMicrotask(() => {
+      const o = window.location.origin;
+      setBrowserOrigin(o);
+      setOriginMismatch(o !== expectedAuthOrigin);
+    });
+  }, [showOriginMismatchHint, expectedAuthOrigin]);
 
   const {
     register,
@@ -132,6 +150,25 @@ export function LoginForm() {
               <Alert variant="destructive" className="mb-6">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{error ?? urlErrorMessage}</AlertDescription>
+              </Alert>
+            )}
+
+            {originMismatch && expectedAuthOrigin && (
+              <Alert className="mb-6 border-amber-500/50 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+                <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <AlertDescription>
+                  You opened <span className="font-mono">{browserOrigin}</span>, but Auth.js is
+                  configured for <span className="font-mono">{expectedAuthOrigin}</span>. Cookies
+                  won&apos;t match across different hosts (e.g.{" "}
+                  <span className="font-mono">localhost</span> vs{" "}
+                  <span className="font-mono">127.0.0.1</span>) or ports — sign-in may fail or not
+                  stick. Open{" "}
+                  <a href={`${expectedAuthOrigin}/login`} className="font-medium underline">
+                    {expectedAuthOrigin}/login
+                  </a>{" "}
+                  in this browser instead (or change <span className="font-mono">NEXTAUTH_URL</span>{" "}
+                  in <span className="font-mono">.env</span> to match how you browse).
+                </AlertDescription>
               </Alert>
             )}
 

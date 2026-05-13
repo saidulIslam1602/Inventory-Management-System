@@ -12,6 +12,17 @@ function publicAuthUrl(): string | undefined {
   return u || undefined;
 }
 
+/** Origin only (`http://localhost:3010`) — for matching browser vs env in dev. */
+export function publicAuthOrigin(): string | undefined {
+  const raw = publicAuthUrl();
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * When `production`, returns whether session cookies must be `Secure` / `__Secure-` prefixed.
  * Returns `undefined` in non-production so Auth.js infers from the incoming request URL (typical local HTTP dev).

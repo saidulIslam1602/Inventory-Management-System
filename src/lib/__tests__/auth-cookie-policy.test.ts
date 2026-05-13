@@ -1,4 +1,4 @@
-import { resolveUseSecureCookies } from "@/lib/auth-cookie-policy";
+import { publicAuthOrigin, resolveUseSecureCookies } from "@/lib/auth-cookie-policy";
 
 const KEYS = ["NODE_ENV", "NEXTAUTH_URL", "AUTH_URL"] as const;
 const env = process.env as Record<string, string | undefined>;
@@ -55,5 +55,39 @@ describe("resolveUseSecureCookies", () => {
     delete env.NEXTAUTH_URL;
     delete env.AUTH_URL;
     expect(resolveUseSecureCookies()).toBeUndefined();
+  });
+});
+
+describe("publicAuthOrigin", () => {
+  let snapshot: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    snapshot = {};
+    for (const k of KEYS) snapshot[k] = env[k];
+  });
+
+  afterEach(() => {
+    for (const k of KEYS) {
+      const v = snapshot[k];
+      if (v === undefined) delete env[k];
+      else env[k] = v;
+    }
+  });
+
+  test("returns origin from NEXTAUTH_URL", () => {
+    env.NEXTAUTH_URL = "http://localhost:3010/dashboard/foo";
+    delete env.AUTH_URL;
+    expect(publicAuthOrigin()).toBe("http://localhost:3010");
+  });
+
+  test("AUTH_URL when NEXTAUTH unset", () => {
+    delete env.NEXTAUTH_URL;
+    env.AUTH_URL = "https://ims.example.com/";
+    expect(publicAuthOrigin()).toBe("https://ims.example.com");
+  });
+
+  test("invalid URL → undefined", () => {
+    env.NEXTAUTH_URL = "not a url";
+    expect(publicAuthOrigin()).toBeUndefined();
   });
 });
