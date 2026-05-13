@@ -15,13 +15,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 export function PortalProfileForm({
   phone: initialPhone,
   address: initialAddress,
+  nationality: initialNationality,
 }: {
   phone: string | null;
   address: string | null;
+  nationality: string | null;
 }) {
   const router = useRouter();
   const [phone, setPhone] = useState(initialPhone ?? "");
   const [address, setAddress] = useState(initialAddress ?? "");
+  const [nationality, setNationality] = useState(initialNationality ?? "");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -31,7 +34,7 @@ export function PortalProfileForm({
     setError(null);
     setOk(null);
     setSubmitting(true);
-    const r = await updateMyEmployeeProfile({ phone, address });
+    const r = await updateMyEmployeeProfile({ phone, address, nationality });
     setSubmitting(false);
     if (!r.success) {
       setError(r.error ?? UserMessage.error.contactNotSaved);
@@ -44,10 +47,10 @@ export function PortalProfileForm({
   return (
     <Card className="shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base font-semibold">Contact information</CardTitle>
+        <CardTitle className="text-base font-semibold">Contact &amp; nationality</CardTitle>
         <p className="text-muted-foreground text-xs font-normal">
-          You may update your phone number and postal address here. Other personal or employment
-          details are maintained by Human Resources; contact HR if anything else needs to change.
+          Update your phone, address, and nationality as registered with the company. Other
+          employment details are maintained by Human Resources.
         </p>
       </CardHeader>
       <CardContent>
@@ -62,6 +65,20 @@ export function PortalProfileForm({
               <AlertDescription className="text-foreground">{ok}</AlertDescription>
             </Alert>
           )}
+          <div className="space-y-2">
+            <Label htmlFor="portal-nationality">Nationality</Label>
+            <Input
+              id="portal-nationality"
+              value={nationality}
+              onChange={(e) => setNationality(e.target.value)}
+              autoComplete="country"
+              placeholder="e.g. Norsk / Norwegian"
+            />
+            <p className="text-muted-foreground text-xs">
+              Used for HR records in line with Norwegian employer obligations. Use the nationality
+              you declare to the company.
+            </p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="portal-phone">Phone number</Label>
             <Input

@@ -9,6 +9,7 @@
  *   All listed prefixes → authentication required
  *
  * Unauthenticated users are redirected to /login.
+ * Users with mustChangePassword may only use /change-password (plus auth API routes) until they update.
  */
 
 import NextAuth from "next-auth";
@@ -28,6 +29,7 @@ const { auth: withAuth } = NextAuth(authConfig);
 const PROTECTED_PREFIXES = [
   "/dashboard",
   "/me",
+  "/profile",
   "/manager",
   "/inventory",
   "/purchase-orders",
@@ -39,22 +41,48 @@ const PROTECTED_PREFIXES = [
   "/settings",
 ];
 
-export default withAuth((req: NextRequest & { auth: { user?: { role?: string } } | null }) => {
+type AuthedUser = { role?: string; mustChangePassword?: boolean };
+
+export default withAuth((req: NextRequest & { auth: { user?: AuthedUser } | null }) => {
   const { pathname } = req.nextUrl;
+  const user = req.auth?.user;
+  const mustChange = user?.mustChangePassword === true;
 
-  // Check if the route needs protection
+  const isChangePassword = pathname.startsWith("/change-password");
+  const isPublicAuthPath =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password");
+
+  if (isChangePassword) {
+    if (!user) {
+      const loginUrl = new URL("/login", req.url);
+      loginUrl.searchParams.set("callbackUrl", "/change-password");
+      return NextResponse.redirect(loginUrl);
+    }
+    return NextResponse.next();
+  }
+
+  if (mustChange && isPublicAuthPath) {
+    return NextResponse.redirect(new URL("/change-password", req.url));
+  }
+
   const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-  if (!isProtected) return NextResponse.next();
+  if (!isProtected) {
+    return NextResponse.next();
+  }
 
-  // Redirect unauthenticated users to login
-  if (!req.auth?.user) {
+  if (!user) {
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Enforce admin-only routes
-  const role = req.auth.user.role;
+  if (mustChange) {
+    return NextResponse.redirect(new URL("/change-password", req.url));
+  }
+
+  const role = user.role;
 
   if (pathname.startsWith("/settings") && !canAccessSettingsPage(role)) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
@@ -72,6 +100,5 @@ export default withAuth((req: NextRequest & { auth: { user?: { role?: string } }
 });
 
 export const config = {
-  // Run on all routes except static assets and API routes that handle auth themselves
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };

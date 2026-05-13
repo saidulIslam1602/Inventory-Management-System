@@ -27,10 +27,14 @@ import {
   AttendanceStatus,
   NotificationType,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { addDays, addHours, addMinutes, eachDayOfInterval, isWeekend, subDays } from "date-fns";
-import { prisma } from "../src/lib/db";
+import { prisma as prismaSingleton } from "../src/lib/db";
+
+/** Typed singleton — some editors infer a narrowed client from `new PrismaClient({ adapter })`. */
+const prisma: PrismaClient = prismaSingleton;
 
 /** Deterministic PRNG for repeatable demo timelines */
 function mulberry32(seed: number) {
@@ -40,6 +44,45 @@ function mulberry32(seed: number) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/** Idempotent unit row: DB may already use NO names (seed re-run) or legacy EN `where` keys */
+async function ensureUnit(aliases: string[], canonical: { name: string; symbol: string }) {
+  const existing = await prisma.unit.findFirst({
+    where: {
+      OR: [
+        ...aliases.map((name) => ({ name })),
+        { name: canonical.name },
+        { symbol: canonical.symbol },
+      ],
+    },
+  });
+  if (existing) {
+    return prisma.unit.update({
+      where: { id: existing.id },
+      data: { name: canonical.name, symbol: canonical.symbol },
+    });
+  }
+  return prisma.unit.create({
+    data: { name: canonical.name, symbol: canonical.symbol },
+  });
+}
+
+async function ensureCategory(aliases: string[], canonical: { name: string; description: string }) {
+  const existing = await prisma.category.findFirst({
+    where: {
+      OR: [...aliases.map((name) => ({ name })), { name: canonical.name }],
+    },
+  });
+  if (existing) {
+    return prisma.category.update({
+      where: { id: existing.id },
+      data: { name: canonical.name, description: canonical.description },
+    });
+  }
+  return prisma.category.create({
+    data: { name: canonical.name, description: canonical.description },
+  });
 }
 
 async function main() {
@@ -165,147 +208,57 @@ async function main() {
 
   // ── Units (SI + NOBBS-typiske handelsenheter, Norge) ───────────────────────
   console.log("📏 Creating units of measure…");
-  const units = await Promise.all([
-    prisma.unit.upsert({
-      where: { name: "Piece" },
-      update: { name: "Stykk", symbol: "stk" },
-      create: { name: "Stykk", symbol: "stk" },
-    }),
-    prisma.unit.upsert({
-      where: { name: "Metre" },
-      update: { name: "Meter", symbol: "m" },
-      create: { name: "Meter", symbol: "m" },
-    }),
-    prisma.unit.upsert({
-      where: { name: "Kilogram" },
-      update: { name: "Kilogram", symbol: "kg" },
-      create: { name: "Kilogram", symbol: "kg" },
-    }),
-    prisma.unit.upsert({
-      where: { name: "Box" },
-      update: { name: "Eske", symbol: "esk" },
-      create: { name: "Eske", symbol: "esk" },
-    }),
-    prisma.unit.upsert({
-      where: { name: "Roll" },
-      update: { name: "Rull", symbol: "rull" },
-      create: { name: "Rull", symbol: "rull" },
-    }),
-    prisma.unit.upsert({
-      where: { name: "Set" },
-      update: { name: "Sett", symbol: "sett" },
-      create: { name: "Sett", symbol: "sett" },
-    }),
-  ]);
-  const [pcs, metre, , box] = units;
-  console.log(`   ✓ ${units.length} units created`);
+  const pcs = await ensureUnit(["Piece", "Stykk"], { name: "Stykk", symbol: "stk" });
+  const metre = await ensureUnit(["Metre", "Meter"], { name: "Meter", symbol: "m" });
+  await ensureUnit(["Kilogram"], { name: "Kilogram", symbol: "kg" });
+  const box = await ensureUnit(["Box", "Eske"], { name: "Eske", symbol: "esk" });
+  await ensureUnit(["Roll", "Rull"], { name: "Rull", symbol: "rull" });
+  await ensureUnit(["Set", "Sett"], { name: "Sett", symbol: "sett" });
+  console.log("   ✓ 6 units created");
 
   // ── Categories (norske navn) ──────────────────────────────────────────────
   console.log("🏷️  Creating categories…");
-  const categories = await Promise.all([
-    prisma.category.upsert({
-      where: { name: "Cables & Wiring" },
-      update: {
-        name: "Kabler & kabling",
-        description: "Kraftkabler, datakabler, koaks, fiber",
-      },
-      create: { name: "Kabler & kabling", description: "Kraftkabler, datakabler, koaks, fiber" },
-    }),
-    prisma.category.upsert({
-      where: { name: "Switchgear & Breakers" },
-      update: {
-        name: "Vern & kurser",
-        description: "Automatsikringer, dreiesikringer, jordfeil, kurser",
-      },
-      create: {
-        name: "Vern & kurser",
-        description: "Automatsikringer, dreiesikringer, jordfeil, kurser",
-      },
-    }),
-    prisma.category.upsert({
-      where: { name: "Conduits & Trunking" },
-      update: {
-        name: "Rør & kabelrenner",
-        description: "Installasjonsrør, stålrørkode, kabelrenner",
-      },
-      create: {
-        name: "Rør & kabelrenner",
-        description: "Installasjonsrør, stålrørkode, kabelrenner",
-      },
-    }),
-    prisma.category.upsert({
-      where: { name: "EV Chargers" },
-      update: {
-        name: "Elbilladere",
-        description: "Ladestasjoner og tilbehør til elbil",
-      },
-      create: { name: "Elbilladere", description: "Ladestasjoner og tilbehør til elbil" },
-    }),
-    prisma.category.upsert({
-      where: { name: "Heat Pumps" },
-      update: {
-        name: "Varmepumper",
-        description: "Luft-til-luft, installasjonssett",
-      },
-      create: { name: "Varmepumper", description: "Luft-til-luft, installasjonssett" },
-    }),
-    prisma.category.upsert({
-      where: { name: "Solar Panels" },
-      update: {
-        name: "Solceller",
-        description: "Moduler, vekselrettere, festesystemer",
-      },
-      create: { name: "Solceller", description: "Moduler, vekselrettere, festesystemer" },
-    }),
-    prisma.category.upsert({
-      where: { name: "Alarm & Security" },
-      update: {
-        name: "Brann & sikkerhet",
-        description: "Brannalarm, detektorer, sentraler, kamera",
-      },
-      create: {
-        name: "Brann & sikkerhet",
-        description: "Brannalarm, detektorer, sentraler, kamera",
-      },
-    }),
-    prisma.category.upsert({
-      where: { name: "Lighting" },
-      update: {
-        name: "Belysning",
-        description: "LED-armatur, nødlys, dimmere",
-      },
-      create: { name: "Belysning", description: "LED-armatur, nødlys, dimmere" },
-    }),
-    prisma.category.upsert({
-      where: { name: "Tools & Equipment" },
-      update: {
-        name: "Verktøy & måleutstyr",
-        description: "Håndverktøy, elverktøy, feltmålere",
-      },
-      create: { name: "Verktøy & måleutstyr", description: "Håndverktøy, elverktøy, feltmålere" },
-    }),
-    prisma.category.upsert({
-      where: { name: "Consumables" },
-      update: {
-        name: "Forbruksmateriell",
-        description: "Tape, strips, skjøter, festemateriell",
-      },
-      create: { name: "Forbruksmateriell", description: "Tape, strips, skjøter, festemateriell" },
-    }),
-  ]);
-  const [
-    cables,
-    switchgear,
-    conduits,
-    evChargers,
-    heatPumps,
-    solar,
-    alarmCat,
-    lighting,
-    toolsCat,
-    consumables,
-  ] = categories;
-  console.log(`   ✓ ${categories.length} categories created`);
+  const cables = await ensureCategory(["Cables & Wiring", "Kabler & kabling"], {
+    name: "Kabler & kabling",
+    description: "Kraftkabler, datakabler, koaks, fiber",
+  });
+  const switchgear = await ensureCategory(["Switchgear & Breakers", "Vern & kurser"], {
+    name: "Vern & kurser",
+    description: "Automatsikringer, dreiesikringer, jordfeil, kurser",
+  });
+  const conduits = await ensureCategory(["Conduits & Trunking", "Rør & kabelrenner"], {
+    name: "Rør & kabelrenner",
+    description: "Installasjonsrør, stålrørkode, kabelrenner",
+  });
+  const evChargers = await ensureCategory(["EV Chargers", "Elbilladere"], {
+    name: "Elbilladere",
+    description: "Ladestasjoner og tilbehør til elbil",
+  });
+  const heatPumps = await ensureCategory(["Heat Pumps", "Varmepumper"], {
+    name: "Varmepumper",
+    description: "Luft-til-luft, installasjonssett",
+  });
+  const solar = await ensureCategory(["Solar Panels", "Solceller"], {
+    name: "Solceller",
+    description: "Moduler, vekselrettere, festesystemer",
+  });
+  const alarmCat = await ensureCategory(["Alarm & Security", "Brann & sikkerhet"], {
+    name: "Brann & sikkerhet",
+    description: "Brannalarm, detektorer, sentraler, kamera",
+  });
+  const lighting = await ensureCategory(["Lighting", "Belysning"], {
+    name: "Belysning",
+    description: "LED-armatur, nødlys, dimmere",
+  });
+  const toolsCat = await ensureCategory(["Tools & Equipment", "Verktøy & måleutstyr"], {
+    name: "Verktøy & måleutstyr",
+    description: "Håndverktøy, elverktøy, feltmålere",
+  });
+  const consumables = await ensureCategory(["Consumables", "Forbruksmateriell"], {
+    name: "Forbruksmateriell",
+    description: "Tape, strips, skjøter, festemateriell",
+  });
+  console.log("   ✓ 10 categories created");
 
   // ── Suppliers ─────────────────────────────────────────────────────────────
   console.log("🏭 Creating suppliers...");
@@ -660,34 +613,37 @@ async function main() {
 
   const adminUser = await prisma.user.upsert({
     where: { email: "admin@aqila.no" },
-    update: { passwordHash },
+    update: { passwordHash, mustChangePassword: false },
     create: {
       name: "Lars Erik Flygel",
       email: "admin@aqila.no",
       passwordHash,
       role: UserRole.ADMIN,
+      mustChangePassword: false,
     },
   });
 
   const managerUser = await prisma.user.upsert({
     where: { email: "manager@aqila.no" },
-    update: { passwordHash },
+    update: { passwordHash, mustChangePassword: false },
     create: {
       name: "Silje Nordvik",
       email: "manager@aqila.no",
       passwordHash,
       role: UserRole.MANAGER,
+      mustChangePassword: false,
     },
   });
 
   const staffUser = await prisma.user.upsert({
     where: { email: "staff@aqila.no" },
-    update: { passwordHash },
+    update: { passwordHash, mustChangePassword: false },
     create: {
       name: "Ole Petter Amundsen",
       email: "staff@aqila.no",
       passwordHash,
       role: UserRole.STAFF,
+      mustChangePassword: false,
     },
   });
 
@@ -699,6 +655,7 @@ async function main() {
       firstName: "Lars Erik",
       lastName: "Flygel",
       hireDate: new Date("2019-11-01"),
+      nationality: "Norsk",
       userId: adminUser.id,
       locationId: svolvær.id,
       departmentId: departments[5].id,
@@ -713,6 +670,7 @@ async function main() {
       firstName: "Silje",
       lastName: "Nordvik",
       hireDate: new Date("2020-03-15"),
+      nationality: "Norsk",
       userId: managerUser.id,
       locationId: gravdal.id,
       departmentId: departments[0].id,
@@ -727,6 +685,7 @@ async function main() {
       firstName: "Ole Petter",
       lastName: "Amundsen",
       hireDate: new Date("2021-06-01"),
+      nationality: "Norsk",
       userId: staffUser.id,
       locationId: svolvær.id,
       departmentId: departments[0].id,
@@ -1005,7 +964,9 @@ async function main() {
       });
     })
   );
-  const customerIdByName = new Map(demoCustomers.map((c) => [c.name, c.id] as const));
+  const customerIdByName = new Map(
+    demoCustomers.map((c: { id: string; name: string }) => [c.name, c.id] as const)
+  );
 
   for (let i = 0; i < 24; i++) {
     const bp = projectBlueprints[i % projectBlueprints.length]!;

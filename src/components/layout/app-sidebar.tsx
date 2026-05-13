@@ -24,6 +24,7 @@ import {
   Settings,
   Zap,
   LogOut,
+  KeyRound,
 } from "lucide-react";
 import {
   Sidebar,
@@ -208,6 +209,16 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
       {/* ── Footer: log out + version ── */}
       <SidebarFooter className="border-sidebar-border gap-2 border-t px-2 py-3">
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              render={<Link href="/change-password" />}
+              tooltip="Change password"
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent w-full"
+            >
+              <KeyRound className="h-4 w-4 shrink-0" />
+              <span>Change password</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               type="button"

@@ -11,4 +11,9 @@ export const myProfileSchema = z.object({
     .max(500)
     .optional()
     .transform((s) => (s?.trim() ? s.trim() : undefined)),
+  nationality: z
+    .string()
+    .max(80)
+    .optional()
+    .transform((s) => (s?.trim() ? s.trim() : undefined)),
 });

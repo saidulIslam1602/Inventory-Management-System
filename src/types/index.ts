@@ -75,6 +75,7 @@ export interface DashboardStats {
 declare module "next-auth" {
   interface User {
     role: UserRole;
+    mustChangePassword?: boolean;
   }
   interface Session {
     user: {
@@ -83,6 +84,7 @@ declare module "next-auth" {
       email?: string | null;
       image?: string | null;
       role: UserRole;
+      mustChangePassword?: boolean;
     };
   }
 }
@@ -97,5 +99,6 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     role: UserRole;
+    mustChangePassword?: boolean;
   }
 }

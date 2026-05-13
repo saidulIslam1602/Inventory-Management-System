@@ -33,7 +33,8 @@ function resolveDatabaseUrl(): string {
 
 const connectionString = resolveDatabaseUrl();
 
-export const prisma =
+/** Explicit `PrismaClient` so consumers (including `prisma/seed.ts`) resolve full model delegates. */
+export const prisma: PrismaClient =
   globalForPrisma.prisma ??
   new PrismaClient({
     adapter: new PrismaPg({ connectionString }),

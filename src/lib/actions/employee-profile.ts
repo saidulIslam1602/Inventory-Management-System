@@ -10,7 +10,7 @@ import type { ActionResult } from "@/types";
 export async function updateMyEmployeeProfile(formData: unknown): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user) return { success: false, error: UserMessage.auth.signInRequired };
-  if (!["STAFF", "MANAGER", "ADMIN"].includes(session.user.role)) {
+  if (!["STAFF", "MANAGER", "ADMIN", "VIEWER"].includes(session.user.role)) {
     return { success: false, error: UserMessage.permission.denied };
   }
 
@@ -36,10 +36,12 @@ export async function updateMyEmployeeProfile(formData: unknown): Promise<Action
       data: {
         phone: parsed.data.phone ?? null,
         address: parsed.data.address ?? null,
+        nationality: parsed.data.nationality ?? null,
       },
     });
 
     revalidatePath("/me");
+    revalidatePath("/profile");
     revalidatePath("/employees");
     return {
       success: true,

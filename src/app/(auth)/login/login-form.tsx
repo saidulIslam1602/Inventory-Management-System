@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import Link from "next/link";
 import { Loader2, AlertCircle, Zap } from "lucide-react";
 
 export function LoginForm() {
@@ -49,6 +50,11 @@ export function LoginForm() {
       return;
     }
     const session = await getSession();
+    if (session?.user?.mustChangePassword) {
+      router.push("/change-password");
+      router.refresh();
+      return;
+    }
     const role = session?.user?.role;
     const next =
       callbackUrl && callbackUrl !== "/dashboard"
@@ -162,6 +168,12 @@ export function LoginForm() {
                   "Sign in"
                 )}
               </Button>
+
+              <p className="text-center text-sm">
+                <Link href="/forgot-password" className="text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </p>
             </form>
           </div>
 

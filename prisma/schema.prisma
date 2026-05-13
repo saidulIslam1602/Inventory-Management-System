@@ -114,6 +114,8 @@ model User {
   emailVerified DateTime?
   image         String?
   passwordHash  String?   // Hashed with bcryptjs for credentials provider
+  /// Set true when provisioning a default password; cleared after the user sets their own.
+  mustChangePassword Boolean @default(false)
   role          UserRole  @default(VIEWER)
   isActive      Boolean   @default(true)
   /// Per-user notification delivery preferences (instant PO events, daily digest). See `notification-preferences.ts`.
@@ -130,6 +132,20 @@ model User {
   notifications  Notification[]
 
   @@map("users")
+}
+
+/// Single-use email OTP for forgot-password (hashed code, time-limited).
+model PasswordResetOtp {
+  id         String    @id @default(cuid())
+  emailNorm  String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([emailNorm])
+  @@map("password_reset_otps")
 }
 
 model Account {
@@ -429,6 +445,8 @@ model Employee {
   lastName     String
   phone        String?
   address      String?
+  /// Citizenship / nationality on file (e.g. «Norsk»). Self-service edit where policy allows.
+  nationality  String?
   photoUrl     String?
   hireDate     DateTime
   isActive     Boolean  @default(true)

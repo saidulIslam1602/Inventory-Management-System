@@ -68,9 +68,10 @@ export async function createEmployee(formData: unknown): Promise<ActionResult<{ 
       const user = await tx.user.create({
         data: {
           name: fullName,
-          email: parsed.data.email,
+          email: parsed.data.email.trim().toLowerCase(),
           passwordHash,
           role: parsed.data.role,
+          mustChangePassword: true,
         },
       });
 
@@ -96,7 +97,8 @@ export async function createEmployee(formData: unknown): Promise<ActionResult<{ 
     return {
       success: true,
       data: { id: result.id },
-      message: "Employee was created successfully.",
+      message:
+        "Employee was created successfully. They will be prompted to set a new password when they first sign in.",
     };
   } catch {
     return {
@@ -134,8 +136,10 @@ export async function updateEmployee(formData: unknown): Promise<ActionResult> {
   });
   if (codeOwner) return { success: false, error: "This employee code is already in use." };
 
-  if (parsed.data.email !== emp.user.email) {
-    const emailTaken = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+  if (parsed.data.email.trim().toLowerCase() !== emp.user.email.trim().toLowerCase()) {
+    const emailTaken = await prisma.user.findUnique({
+      where: { email: parsed.data.email.trim().toLowerCase() },
+    });
     if (emailTaken) {
       return { success: false, error: "An account with this email address already exists." };
     }
@@ -151,9 +155,9 @@ export async function updateEmployee(formData: unknown): Promise<ActionResult> {
         where: { id: emp.userId },
         data: {
           name: fullName,
-          email: parsed.data.email,
+          email: parsed.data.email.trim().toLowerCase(),
           role: parsed.data.role,
-          ...(passwordHash ? { passwordHash } : {}),
+          ...(passwordHash ? { passwordHash, mustChangePassword: false } : {}),
         },
       });
 

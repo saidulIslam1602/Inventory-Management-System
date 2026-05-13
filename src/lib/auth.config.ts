@@ -22,10 +22,21 @@ export default {
   },
 
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session: updateSession }) {
       if (user) {
         token.id = user.id!;
         token.role = user.role;
+        token.mustChangePassword = user.mustChangePassword === true;
+      }
+      if (
+        trigger === "update" &&
+        updateSession &&
+        typeof updateSession === "object" &&
+        "mustChangePassword" in updateSession
+      ) {
+        token.mustChangePassword = Boolean(
+          (updateSession as { mustChangePassword?: boolean }).mustChangePassword
+        );
       }
       return token;
     },
@@ -34,6 +45,7 @@ export default {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as import("@prisma/client").UserRole;
+        session.user.mustChangePassword = token.mustChangePassword === true;
       }
       return session;
     },

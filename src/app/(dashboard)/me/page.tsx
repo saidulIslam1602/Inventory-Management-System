@@ -615,7 +615,9 @@ export default async function EmployeePortalPage() {
         </CardContent>
       </Card>
 
-      {emp && showOpsCards && <PortalProfileForm phone={emp.phone} address={emp.address} />}
+      {emp && (
+        <PortalProfileForm phone={emp.phone} address={emp.address} nationality={emp.nationality} />
+      )}
     </div>
   );
 }
