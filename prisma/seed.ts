@@ -27,14 +27,10 @@ import {
   AttendanceStatus,
   NotificationType,
   Prisma,
-  type PrismaClient,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { addDays, addHours, addMinutes, eachDayOfInterval, isWeekend, subDays } from "date-fns";
-import { prisma as prismaSingleton } from "../src/lib/db";
-
-/** Typed singleton — some editors infer a narrowed client from `new PrismaClient({ adapter })`. */
-const prisma: PrismaClient = prismaSingleton;
+import { prisma } from "../src/lib/db";
 
 /** Deterministic PRNG for repeatable demo timelines */
 function mulberry32(seed: number) {
