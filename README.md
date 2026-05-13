@@ -333,6 +333,13 @@ On merge to **`main`**: build → push image → deploy to VPS → healthcheck (
 
 Typical secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, plus runtime env mirroring production (`DATABASE_URL`, `AUTH_SECRET`, `NEXTAUTH_URL`, …).
 
+### GitHub push and workflow files
+
+If **`git push`** fails with **OAuth … without `workflow` scope**, GitHub is blocking updates to **`.github/workflows/**`\*\* over HTTPS. Fix one of:
+
+1. **`gh auth refresh -h github.com -s workflow`** — finish the browser/device flow so HTTPS credentials include the workflow scope.
+2. **SSH remote** — run **[`scripts/github-ssh-push-instructions.sh`](scripts/github-ssh-push-instructions.sh)** to print your public key, add it at [GitHub → SSH keys](https://github.com/settings/ssh/new), set **`origin`** to **`git@github.com:saidulIslam1602/Inventory-Management-System.git`**, then **`git push origin main`**.
+
 ---
 
 ## Environment variables
