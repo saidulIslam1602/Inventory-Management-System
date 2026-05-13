@@ -17,6 +17,7 @@ import {
   Users,
 } from "lucide-react";
 import { auth } from "@/lib/auth";
+import { canAccessManagerHub } from "@/lib/rbac";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -60,9 +61,7 @@ export default async function ManagerHubPage({ searchParams }: PageProps) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (session.user.role === "STAFF") redirect("/me");
-  if (!["ADMIN", "MANAGER", "VIEWER"].includes(session.user.role)) redirect("/dashboard");
-
-  const readOnly = session.user.role === "VIEWER";
+  if (!canAccessManagerHub(session.user.role)) redirect("/dashboard");
 
   const sp = await searchParams;
   const rawLoc = sp.location;
@@ -155,7 +154,7 @@ export default async function ManagerHubPage({ searchParams }: PageProps) {
         </p>
       ) : null}
 
-      <ManagerDecisionQueueSection items={decisionQueue} readOnly={readOnly} />
+      <ManagerDecisionQueueSection items={decisionQueue} />
 
       {/* Weekly digest */}
       <Card className="shadow-sm">
@@ -234,7 +233,6 @@ export default async function ManagerHubPage({ searchParams }: PageProps) {
                         <ManagerExceptionEscalateButton
                           purchaseOrderId={poForNote}
                           prefill={prefill}
-                          readOnly={readOnly}
                         />
                       </div>
                     ) : null}
@@ -304,9 +302,7 @@ export default async function ManagerHubPage({ searchParams }: PageProps) {
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">PO approval inbox</CardTitle>
             <p className="text-muted-foreground text-xs font-normal">
-              {readOnly
-                ? "Read-only — approvals require Manager or Admin."
-                : "Submitted, oldest first."}{" "}
+              Submitted, oldest first.{" "}
               <span className="text-muted-foreground/90">
                 SLA: due soon from 2d queued, over SLA from 3d.
               </span>
@@ -466,7 +462,7 @@ export default async function ManagerHubPage({ searchParams }: PageProps) {
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <ManagerTransferSuggestionsTable transfers={transfers} canExecute={!readOnly} />
+          <ManagerTransferSuggestionsTable transfers={transfers} />
           <div className="border-t px-4 py-3">
             <Button asChild variant="outline" size="sm">
               <Link href="/inventory">Open inventory & movements</Link>

@@ -37,6 +37,7 @@ import {
   Package,
   Bell,
   ArrowDownCircle,
+  FileSpreadsheet,
 } from "lucide-react";
 import { formatQuantityNbNo } from "@/lib/utils";
 
@@ -204,6 +205,24 @@ export default async function EmployeePortalPage() {
             : "Your account is not linked to an employee profile. Use the main dashboard and settings, or contact HR."
         }
       />
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <FileSpreadsheet className="text-primary h-4 w-4" aria-hidden />
+            CSV export attestations
+          </CardTitle>
+          <p className="text-muted-foreground text-xs font-normal leading-relaxed">
+            See when you downloaded spreadsheets via Aqila&apos;s export endpoints (the same events
+            administrators can review org-wide in the audit log).
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/me/my-exports">View my export log</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {!emp && (
         <Card className="border-warning/35 bg-warning/10 shadow-sm">

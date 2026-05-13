@@ -8,6 +8,8 @@ import Link from "next/link";
 import { Plus, Package } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { parseDashboardPins } from "@/lib/dashboard-pins";
+import { canViewCatalogPricing } from "@/lib/rbac";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -78,10 +80,23 @@ async function getInventoryData() {
 
 export default async function InventoryPage() {
   const session = await auth();
+  const viewerPinnedProductIds =
+    session?.user?.role === "VIEWER"
+      ? parseDashboardPins(
+          (
+            await prisma.user.findUnique({
+              where: { id: session.user.id },
+              select: { dashboardPins: true },
+            })
+          )?.dashboardPins
+        ).productIds
+      : undefined;
+
   const { products, locations, locationStats, categories, suppliers, locationFilterOptions } =
     await getInventoryData();
 
   const canEdit = session?.user?.role === "ADMIN" || session?.user?.role === "MANAGER";
+  const showPricingColumns = canViewCatalogPricing(session?.user?.role);
   const lowStockTotal = locationStats.reduce((sum, loc) => sum + loc.lowStockCount, 0);
 
   return (
@@ -155,9 +170,11 @@ export default async function InventoryPage() {
           <InventoryTable
             products={products}
             canEdit={canEdit}
+            showPricingColumns={showPricingColumns}
             categories={categories}
             suppliers={suppliers}
             locations={locationFilterOptions}
+            viewerPinnedProductIds={viewerPinnedProductIds}
           />
         </CardContent>
       </Card>

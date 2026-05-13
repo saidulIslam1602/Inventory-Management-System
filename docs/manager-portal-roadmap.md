@@ -27,11 +27,11 @@ Track enhancements for **MANAGER** users (approvals, team oversight, purchasing/
 
 ## Data & exports
 
-| Item                                                | Status | Notes                                                                        |
-| --------------------------------------------------- | ------ | ---------------------------------------------------------------------------- |
-| **Financial CSV exports (PO, movements, projects)** | Done   | `canExportFinancialCsv` — ADMIN \| MANAGER \| STAFF                          |
-| **Attendance CSV (org-wide / filtered)**            | Done   | `canExportAttendanceCsv`; STAFF differs (self-scope)                         |
-| **Employees directory CSV**                         | Done   | ADMIN \| MANAGER \| VIEWER (`canExportEmployeesDirectoryCsv`; STAFF blocked) |
+| Item                                                | Status | Notes                                                                                                                                                                 |
+| --------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Financial CSV exports (PO, movements, projects)** | Done   | `canExportFinancialCsv` — **ADMIN \| MANAGER** only (STAFF blocked from bulk extract; ops UI uses `canViewCatalogPricing` / `canViewMovementLedgerFinancialColumns`). |
+| **Attendance CSV (org-wide / filtered)**            | Done   | `canExportAttendanceCsv`; STAFF differs (self-scope)                                                                                                                  |
+| **Employees directory CSV**                         | Done   | ADMIN \| MANAGER \| VIEWER (`canExportEmployeesDirectoryCsv`; STAFF blocked)                                                                                          |
 
 ---
 

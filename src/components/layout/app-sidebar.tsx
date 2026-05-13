@@ -64,7 +64,7 @@ const NAV_CORE: NavItem[] = [
     title: "Manager hub",
     href: "/manager",
     icon: Building2,
-    roles: ["ADMIN", "MANAGER", "VIEWER"],
+    roles: ["ADMIN", "MANAGER"],
     featureFlag: "managerHub",
   },
   {
@@ -106,6 +106,7 @@ const NAV_CORE: NavItem[] = [
     href: "/reports",
     icon: BarChart3,
     featureFlag: "reports",
+    roles: ["ADMIN", "MANAGER"],
   },
 ];
 

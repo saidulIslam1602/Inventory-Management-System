@@ -18,12 +18,12 @@ import {
 export function ManagerExceptionEscalateButton({
   purchaseOrderId,
   prefill,
-  readOnly,
+  readOnly = false,
 }: {
   purchaseOrderId: string;
   /** Context from the exception row — editable before submit */
   prefill: string;
-  readOnly: boolean;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);

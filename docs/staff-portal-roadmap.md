@@ -32,11 +32,11 @@ Track enhancements for **STAFF** users (primary entry: **`/me`**, warehouse rece
 
 ## Operations & trust
 
-| Item                                                                | Status | Notes                                         |
-| ------------------------------------------------------------------- | ------ | --------------------------------------------- |
-| **STAFF blocked at edge from `/employees`, `/reports`, `/manager`** | Done   | `proxy.ts` + `staffBlockedPathname`           |
-| **Financial CSV exports: STAFF allowed where policy says ops**      | Done   | See `rbac.ts` + export routes                 |
-| **Clear permission errors (user-messages) on STAFF actions**        | Done   | Ongoing; keep aligned with `user-messages.ts` |
+| Item                                                                | Status | Notes                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **STAFF blocked at edge from `/employees`, `/reports`, `/manager`** | Done   | `proxy.ts` + `staffBlockedPathname`                                                                                                                                                                                                                       |
+| **Bulk financial CSV (PO / movements / projects APIs)**             | Done   | **ADMIN \| MANAGER** only (`canExportFinancialCsv`). STAFF keeps **on-screen** pricing & movement cost columns (`canViewCatalogPricing`, `canViewMovementLedgerFinancialColumns`) plus **self-scoped** attendance CSV (`canExportAttendanceCsv` + route). |
+| **Clear permission errors (user-messages) on STAFF actions**        | Done   | Ongoing; keep aligned with `user-messages.ts`                                                                                                                                                                                                             |
 
 ---
 

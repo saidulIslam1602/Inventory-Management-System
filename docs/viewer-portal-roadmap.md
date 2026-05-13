@@ -10,36 +10,37 @@ Track enhancements for **VIEWER** users (read-heavy access: browse inventory, PO
 
 ## Read experience
 
-| Item                                                                             | Status      | Notes                                                               |
-| -------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------- |
-| **Dashboard + browse catalogs (inventory, POs, projects, suppliers, customers)** | Done        | Viewer uses same authenticated app surfaces with server-side guards |
-| **Global search (CmdK)**                                                         | Done        | Full discovery except policies enforced elsewhere                   |
-| **Header notifications (+ `/me` if Viewer uses portal)**                         | Done        | Shared UX; unread counts wherever role can access `/me`             |
-| **Curated “my watchlist” / pinned entities on dashboard**                        | Not started | Faster return to tracked SKUs/projects                              |
-| **Explain stock / links to last movement summaries on product**                  | Not started | Reduces “why is quantity X?” escalations                            |
-| **Read-only trend cards (movement velocity, backlog age)**                       | Not started | Charts only; export still gated                                     |
+| Item                                                                             | Status | Notes                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dashboard + browse catalogs (inventory, POs, projects, suppliers, customers)** | Done   | Viewer uses same authenticated app surfaces with server-side guards                                                                                                                                                                 |
+| **Org reference on `/settings` (read-only lists)**                               | Done   | Locations, users, categories, units, departments; threshold edits ADMIN-only                                                                                                                                                        |
+| **Global search (CmdK)**                                                         | Done   | Module hits respect **feature flags**. **STAFF** has no employee hits; **VIEWER** does when `employees` is on. Product rows open **movements** (`?product=`) for VIEWER (edit URL is blocked at the edge).                          |
+| **Header notifications (+ `/me` if Viewer uses portal)**                         | Done   | Shared UX; unread counts wherever role can access `/me`                                                                                                                                                                             |
+| **Curated “my watchlist” / pinned entities on dashboard**                        | Done   | `User.dashboardPins` JSON; **VIEWER** bookmark column on Inventory & Projects; **My watchlist** card on `/dashboard`. Caps: 10 products / 10 projects; respects **projects** feature flag.                                          |
+| **Explain stock / links to last movement summaries on product**                  | Done   | Read-only **`/inventory/[id]`**: ledger explainer, stock-by-location, latest movements + deep link to **`/inventory/movements?product=`**; product names link from catalog                                                          |
+| **Read-only trend cards (movement velocity, backlog age)**                       | Done   | Dashboard: **Movement volume** chart (sum of IN vs OUT quantities, same period picker as activity chart); **Receive backlog age** bar chart (ORDERED / PARTIALLY_RECEIVED POs by SLA tier vs last update). Charts only — no export. |
 
 ---
 
 ## Blocked mutations (parity with code)
 
-| Item                                                                        | Status      | Notes                                                                                                      |
-| --------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| **Edge block: inventory receive/new/edit paths**                            | Done        | `viewerBlockedWritePathname`                                                                               |
-| **Edge block: `purchase-orders/new`, `projects/new`, customer create/edit** | Done        | Same helper                                                                                                |
-| **Cannot record stock movements (server)**                                  | Done        | `canRecordStockMovement` excludes VIEWER                                                                   |
-| **Restrict `/manager` for VIEWER (optional)**                               | Not started | Today `canAccessManagerHub` includes VIEWER — change policy explicitly if mgr UI should exclude reads-only |
+| Item                                                                        | Status | Notes                                                                                                                         |
+| --------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Edge block: inventory receive/new/edit paths**                            | Done   | `viewerBlockedWritePathname`                                                                                                  |
+| **Edge block: `purchase-orders/new`, `projects/new`, customer create/edit** | Done   | Same helper                                                                                                                   |
+| **Cannot record stock movements (server)**                                  | Done   | `canRecordStockMovement` excludes VIEWER                                                                                      |
+| **Restrict `/manager` for VIEWER (optional)**                               | Done   | `canAccessManagerHub`: ADMIN/MANAGER only; edge `viewerBlockedManagerHubPathname`; sidebar + dashboard link hidden for VIEWER |
 
 ---
 
 ## Exports & compliance
 
-| Item                                         | Status      | Notes                                               |
-| -------------------------------------------- | ----------- | --------------------------------------------------- |
-| **Employees directory CSV**                  | Done        | VIEWER allowed per `canExportEmployeesDirectoryCsv` |
-| **Financial CSVs blocked**                   | Done        | VIEWER forbidden for `canExportFinancialCsv`        |
-| **Attendance team CSV blocked**              | Done        | VIEWER forbidden for `canExportAttendanceCsv`       |
-| **Export audit trail (who downloaded what)** | Not started | Trust feature for auditors                          |
+| Item                                         | Status | Notes                                                                                                                                                                                                                     |
+| -------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Employees directory CSV**                  | Done   | VIEWER allowed per `canExportEmployeesDirectoryCsv`                                                                                                                                                                       |
+| **Financial CSVs blocked**                   | Done   | VIEWER forbidden for `canExportFinancialCsv`                                                                                                                                                                              |
+| **Attendance team CSV blocked**              | Done   | VIEWER forbidden for `canExportAttendanceCsv`                                                                                                                                                                             |
+| **Export audit trail (who downloaded what)** | Done   | **`/me/my-exports`** — paginated **EXPORT** `AuditEvent` rows for the signed-in user only; linked from **My portal**. Server CSV exports only (matches admin audit log); client-built CSVs noted as out of scope on page. |
 
 ---
 

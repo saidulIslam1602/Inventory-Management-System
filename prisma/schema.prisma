@@ -130,6 +130,8 @@ model User {
   isActive      Boolean   @default(true)
   /// Per-user notification delivery preferences (instant PO events, daily digest). See `notification-preferences.ts`.
   notificationPreferences Json?
+  /// Viewer dashboard shortcuts: `{ "productIds": string[], "projectIds": string[] }`. See `dashboard-pins.ts`.
+  dashboardPins Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

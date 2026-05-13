@@ -17,10 +17,10 @@ function queueBadgeOutlineClass(item: ManagerDecisionQueueItem): string {
 
 export function ManagerDecisionQueueSection({
   items,
-  readOnly,
+  readOnly = false,
 }: {
   items: ManagerDecisionQueueItem[];
-  readOnly: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <Card id="manager-decision-inbox" className="border-primary/15 scroll-mt-28 shadow-md">

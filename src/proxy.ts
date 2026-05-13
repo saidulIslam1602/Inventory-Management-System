@@ -5,6 +5,8 @@
  * Role-based access is enforced per route group:
  *   /settings → ADMIN, MANAGER, VIEWER (STAFF redirected)
  *   /employees, /reports, /manager → STAFF blocked (redirect to /me)
+ *   /manager → VIEWER blocked (redirect to /dashboard)
+ *   /reports → VIEWER blocked (redirect to /dashboard)
  *   Mutation-only paths (inventory receive/edit/new, PO/project/customer create, etc.) → VIEWER blocked
  *   All listed prefixes → authentication required
  *
@@ -17,6 +19,8 @@ import authConfig from "@/lib/auth.config";
 import {
   canAccessSettingsPage,
   staffBlockedPathname,
+  viewerBlockedManagerHubPathname,
+  viewerBlockedReportsPathname,
   viewerBlockedWritePathname,
 } from "@/lib/rbac";
 import { NextResponse } from "next/server";
@@ -98,6 +102,14 @@ export default withAuth((req: NextRequest & { auth: { user?: AuthedUser } | null
 
   if (role === "STAFF" && staffBlockedPathname(pathname)) {
     return NextResponse.redirect(new URL("/me", req.url));
+  }
+
+  if (role === "VIEWER" && viewerBlockedManagerHubPathname(pathname)) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
+  if (role === "VIEWER" && viewerBlockedReportsPathname(pathname)) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
   }
 
   if (role === "VIEWER" && viewerBlockedWritePathname(pathname)) {

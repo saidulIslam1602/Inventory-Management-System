@@ -67,7 +67,6 @@ export interface PaginatedResult<T> {
 
 export interface DashboardStats {
   totalProducts: number;
-  totalStockValue: number;
   lowStockCount: number;
   pendingPOCount: number;
   activeEmployeesToday: number;

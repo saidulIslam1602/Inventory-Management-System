@@ -10,6 +10,7 @@ import Link from "next/link";
 import { Edit2, AlertTriangle, CheckCircle2, Filter } from "lucide-react";
 import { DataTable, type Column } from "@/components/shared/data-table";
 import { Button } from "@/components/ui/button";
+import { DashboardPinToggle } from "@/components/dashboard/dashboard-pin-toggle";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { cn, formatQuantityNbNo } from "@/lib/utils";
@@ -42,9 +43,13 @@ export interface InventoryFilterOption {
 interface InventoryTableProps {
   products: ProductRow[];
   canEdit: boolean;
+  /** When false (VIEWER), hide unit price column and omit pricing from client CSV export. */
+  showPricingColumns?: boolean;
   categories: InventoryFilterOption[];
   suppliers: InventoryFilterOption[];
   locations: InventoryFilterOption[];
+  /** When set (typically for VIEWER), show a bookmark column to pin rows to the dashboard watchlist. */
+  viewerPinnedProductIds?: string[];
 }
 
 type StockHealthFilter = "all" | "low" | "healthy";
@@ -54,9 +59,11 @@ const NO_SUPPLIER = "__none__";
 export function InventoryTable({
   products,
   canEdit,
+  showPricingColumns = true,
   categories,
   suppliers,
   locations,
+  viewerPinnedProductIds,
 }: InventoryTableProps) {
   const [categoryId, setCategoryId] = useState("");
   const [supplierId, setSupplierId] = useState("");
@@ -100,25 +107,25 @@ export function InventoryTable({
       "Name",
       "Category",
       "Supplier",
-      "Unit price (kr)",
+      ...(showPricingColumns ? ["Unit price (kr)"] : []),
       "Stock by location",
     ];
-    const data = filteredProducts.map((p) => [
-      p.sku,
-      p.barcode ?? "",
-      p.name,
-      p.category.name,
-      p.supplier?.name ?? "",
-      Number(p.unitPrice).toLocaleString("nb-NO", { minimumFractionDigits: 2 }),
-      p.stock
+    const data = filteredProducts.map((p) => {
+      const stockCell = p.stock
         .map(
           (s) =>
             `${s.location.name}: ${formatQuantityNbNo(Number(s.quantity), p.unit.symbol)} ${p.unit.symbol}${
               Number(s.quantity) <= Number(s.reorderPoint) ? " (low)" : ""
             }`
         )
-        .join(" | "),
-    ]);
+        .join(" | ");
+      const base = [p.sku, p.barcode ?? "", p.name, p.category.name, p.supplier?.name ?? ""];
+      if (showPricingColumns) {
+        base.push(Number(p.unitPrice).toLocaleString("nb-NO", { minimumFractionDigits: 2 }));
+      }
+      base.push(stockCell);
+      return base;
+    });
     const blob = new Blob([withUtf8Bom(rowsToCsv(headers, data))], {
       type: "text/csv;charset=utf-8",
     });
@@ -148,7 +155,12 @@ export function InventoryTable({
       header: "Product",
       render: (p) => (
         <div>
-          <div className="text-foreground font-medium">{p.name}</div>
+          <Link
+            href={`/inventory/${p.id}`}
+            className="text-foreground hover:text-primary font-medium underline-offset-4 hover:underline"
+          >
+            {p.name}
+          </Link>
           <div className="text-muted-foreground text-xs">{p.category.name}</div>
         </div>
       ),
@@ -190,15 +202,19 @@ export function InventoryTable({
         </div>
       ),
     },
-    {
-      key: "unitPrice",
-      header: "Unit Price",
-      render: (p) => (
-        <span className="font-mono text-sm">
-          kr {Number(p.unitPrice).toLocaleString("nb-NO", { minimumFractionDigits: 2 })}
-        </span>
-      ),
-    },
+    ...(showPricingColumns
+      ? [
+          {
+            key: "unitPrice",
+            header: "Unit Price",
+            render: (p: ProductRow) => (
+              <span className="font-mono text-sm">
+                kr {Number(p.unitPrice).toLocaleString("nb-NO", { minimumFractionDigits: 2 })}
+              </span>
+            ),
+          },
+        ]
+      : []),
     {
       key: "supplier",
       header: "Supplier",
@@ -206,6 +222,22 @@ export function InventoryTable({
         <span className="text-muted-foreground text-sm">{p.supplier?.name ?? "—"}</span>
       ),
     },
+    ...(viewerPinnedProductIds !== undefined
+      ? [
+          {
+            key: "watchlist",
+            header: "",
+            render: (p: ProductRow) => (
+              <DashboardPinToggle
+                kind="product"
+                entityId={p.id}
+                initialPinned={viewerPinnedProductIds.includes(p.id)}
+              />
+            ),
+            className: "w-11",
+          },
+        ]
+      : []),
     ...(canEdit
       ? [
           {

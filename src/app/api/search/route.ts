@@ -13,14 +13,22 @@ import { UserMessage } from "@/lib/user-messages";
 
 function productPrimaryHref(
   p: { id: string; sku: string; barcode: string | null },
-  qTrim: string
+  qTrim: string,
+  role: UserRole
 ): string {
   const ql = qTrim.toLowerCase();
   const exact =
     p.id === qTrim ||
     p.sku.toLowerCase() === ql ||
     (p.barcode != null && p.barcode.toLowerCase() === ql);
-  return exact ? `/inventory/movements?product=${p.id}` : `/inventory/${p.id}/edit`;
+  const movements = `/inventory/movements?product=${p.id}`;
+  if (role === UserRole.VIEWER) {
+    return movements;
+  }
+  if (role === UserRole.STAFF) {
+    return exact ? movements : `/inventory/${p.id}`;
+  }
+  return exact ? movements : `/inventory/${p.id}/edit`;
 }
 
 export async function GET(req: Request) {
@@ -184,7 +192,7 @@ export async function GET(req: Request) {
     seen.add(exactSkuBarcode.id);
     merged.push({
       ...exactSkuBarcode,
-      href: productPrimaryHref(exactSkuBarcode, qTrim),
+      href: productPrimaryHref(exactSkuBarcode, qTrim, role),
     });
   }
 
@@ -193,7 +201,7 @@ export async function GET(req: Request) {
     seen.add(p.id);
     merged.push({
       ...p,
-      href: productPrimaryHref(p, qTrim),
+      href: productPrimaryHref(p, qTrim, role),
     });
     if (merged.length >= 8) break;
   }

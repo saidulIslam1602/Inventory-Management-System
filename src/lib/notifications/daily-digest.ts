@@ -9,6 +9,7 @@ import { getAppSettings } from "@/lib/app-settings";
 import { wantsDigestDaily } from "@/lib/notification-preferences";
 import { buildExceptionQueue } from "@/lib/queries/manager-overview";
 import { findPurchaseOrdersPastApprovalThreshold } from "./approval-escalation";
+import { canAccessManagerHub } from "@/lib/rbac";
 
 const DIGEST_COOLDOWN_HOURS = 22;
 
@@ -91,7 +92,7 @@ export async function buildOpsDigestLines(): Promise<string[]> {
 export async function ensureDailyDigestForUser(userId: string): Promise<void> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { notificationPreferences: true, isActive: true },
+    select: { notificationPreferences: true, isActive: true, role: true },
   });
   if (!user?.isActive || !wantsDigestDaily(user.notificationPreferences)) return;
 
@@ -114,7 +115,7 @@ export async function ensureDailyDigestForUser(userId: string): Promise<void> {
       type: NotificationType.DAILY_DIGEST,
       title: "Daily ops digest",
       message: lines.join("\n"),
-      actionHref: "/manager",
+      actionHref: canAccessManagerHub(user.role) ? "/manager" : "/dashboard",
     },
   });
 }

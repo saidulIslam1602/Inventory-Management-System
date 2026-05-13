@@ -20,6 +20,11 @@ import { StatsCard } from "@/components/shared/stats-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StockTrendChart } from "@/components/inventory/stock-trend-chart";
+import { StockQuantityTrendChart } from "@/components/inventory/stock-quantity-trend-chart";
+import {
+  ReceiveBacklogAgeChart,
+  type ReceiveBacklogAgeBuckets,
+} from "@/components/dashboard/receive-backlog-age-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatQuantityNbNo } from "@/lib/utils";
@@ -31,8 +36,12 @@ import {
   osloPeriodUtcBounds,
   parseChartPeriod,
 } from "@/lib/chart-period";
+import { receivingPipelineAgingTier } from "@/lib/manager-aging";
+import { canAccessManagerHub } from "@/lib/rbac";
+import { movementQuantityDisplayPrefix } from "@/lib/stock-movement-display";
 import { ChartPeriodToolbar } from "@/components/shared/chart-period-toolbar";
 import { Button } from "@/components/ui/button";
+import { ViewerWatchlistSection } from "@/components/dashboard/viewer-watchlist-section";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -83,6 +92,65 @@ async function getMovementTrendData(mode: ChartPeriodMode, offset: number) {
   }));
 }
 
+async function getMovementQuantityTrendData(mode: ChartPeriodMode, offset: number) {
+  const { start, end } = osloPeriodUtcBounds(mode, offset);
+
+  if (mode === "year") {
+    const monthly = await prisma.$queryRaw<
+      Array<{ date: Date; in_qty: unknown; out_qty: unknown }>
+    >`
+      SELECT
+        (date_trunc('month', ("createdAt" AT TIME ZONE 'Europe/Oslo')))::date as date,
+        COALESCE(SUM(quantity) FILTER (WHERE type = 'IN'), 0) as in_qty,
+        COALESCE(SUM(quantity) FILTER (WHERE type = 'OUT'), 0) as out_qty
+      FROM stock_movements
+      WHERE "createdAt" >= ${start} AND "createdAt" <= ${end}
+      GROUP BY date_trunc('month', ("createdAt" AT TIME ZONE 'Europe/Oslo'))
+      ORDER BY date ASC
+    `;
+    return monthly.map((row) => ({
+      date: row.date.toLocaleDateString("nb-NO", {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }),
+      inQty: Number(row.in_qty),
+      outQty: Number(row.out_qty),
+    }));
+  }
+
+  const daily = await prisma.$queryRaw<Array<{ date: Date; in_qty: unknown; out_qty: unknown }>>`
+    SELECT
+      ("createdAt" AT TIME ZONE 'Europe/Oslo')::date as date,
+      COALESCE(SUM(quantity) FILTER (WHERE type = 'IN'), 0) as in_qty,
+      COALESCE(SUM(quantity) FILTER (WHERE type = 'OUT'), 0) as out_qty
+    FROM stock_movements
+    WHERE "createdAt" >= ${start} AND "createdAt" <= ${end}
+    GROUP BY ("createdAt" AT TIME ZONE 'Europe/Oslo')::date
+    ORDER BY date ASC
+  `;
+
+  return daily.map((row) => ({
+    date: row.date.toLocaleDateString("nb-NO", { day: "numeric", month: "short", timeZone: "UTC" }),
+    inQty: Number(row.in_qty),
+    outQty: Number(row.out_qty),
+  }));
+}
+
+function aggregateReceiveBacklogBuckets(rows: { updatedAt: Date }[]): ReceiveBacklogAgeBuckets {
+  const buckets: ReceiveBacklogAgeBuckets = {
+    on_track: 0,
+    attention: 0,
+    stalled: 0,
+  };
+  const now = Date.now();
+  for (const row of rows) {
+    const days = Math.floor((now - row.updatedAt.getTime()) / 86_400_000);
+    buckets[receivingPipelineAgingTier(days)] += 1;
+  }
+  return buckets;
+}
+
 async function getDashboardData(mode: ChartPeriodMode, offset: number) {
   const [
     totalProducts,
@@ -91,7 +159,7 @@ async function getDashboardData(mode: ChartPeriodMode, offset: number) {
     activeProjects,
     todayAttendance,
     recentMovements,
-    stockValueResult,
+    receiveBacklogRows,
   ] = await Promise.all([
     // Total active products
     prisma.product.count({ where: { isActive: true } }),
@@ -158,17 +226,18 @@ async function getDashboardData(mode: ChartPeriodMode, offset: number) {
       },
     }),
 
-    // Total stock value (sum of quantity * unitPrice per product)
-    prisma.$queryRaw<[{ total: bigint }]>`
-      SELECT COALESCE(SUM(s.quantity * p."unitPrice"), 0) AS total
-      FROM stock s
-      JOIN products p ON s."productId" = p.id
-    `,
+    prisma.purchaseOrder.findMany({
+      where: { status: { in: ["ORDERED", "PARTIALLY_RECEIVED"] } },
+      select: { updatedAt: true },
+    }),
   ]);
 
-  const chartData = await getMovementTrendData(mode, offset);
+  const [chartData, quantityChartData] = await Promise.all([
+    getMovementTrendData(mode, offset),
+    getMovementQuantityTrendData(mode, offset),
+  ]);
 
-  const totalStockValue = Number(stockValueResult[0]?.total ?? 0);
+  const receiveBacklogBuckets = aggregateReceiveBacklogBuckets(receiveBacklogRows);
 
   // Normalise low-stock rows for the template
   const lowStockItems = lowStockRaw.map((r) => ({
@@ -186,8 +255,9 @@ async function getDashboardData(mode: ChartPeriodMode, offset: number) {
     activeProjects,
     todayAttendance,
     recentMovements,
-    totalStockValue,
     chartData,
+    quantityChartData,
+    receiveBacklogBuckets,
     chartPeriod: {
       mode,
       offset,
@@ -207,7 +277,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const { mode, offset } = parseChartPeriod(sp);
   const data = await getDashboardData(mode, offset);
   const session = await auth();
-  const showManagerHub = ["ADMIN", "MANAGER", "VIEWER"].includes(session?.user?.role ?? "");
+  const showManagerHub = canAccessManagerHub(session?.user?.role);
 
   return (
     <div className="space-y-6">
@@ -231,6 +301,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           ) : undefined
         }
       />
+
+      <ViewerWatchlistSection />
 
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -270,9 +342,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               <div>
                 <CardTitle className="flex items-center gap-2 text-base font-semibold">
                   <ArrowUpDown className="text-primary h-4 w-4" />
-                  Stock movements — {data.chartPeriod.title}
+                  Movement activity — {data.chartPeriod.title}
                 </CardTitle>
                 <p className="text-muted-foreground mt-1 text-xs">{data.chartPeriod.detail}</p>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Count of stock movement rows (IN vs OUT) per{" "}
+                  {data.chartPeriod.bucket === "month" ? "calendar month" : "day"} (Oslo).
+                </p>
                 {data.chartPeriod.bucket === "month" && (
                   <p className="text-muted-foreground text-xs">
                     Monthly totals (Oslo calendar year)
@@ -345,6 +421,55 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </Card>
       </div>
 
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Card className="shadow-sm lg:col-span-2">
+          <CardHeader className="space-y-3 pb-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                  <ArrowUpDown className="text-primary h-4 w-4" />
+                  Movement volume — {data.chartPeriod.title}
+                </CardTitle>
+                <p className="text-muted-foreground mt-1 text-xs">{data.chartPeriod.detail}</p>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  Sum of movement quantities on IN vs OUT lines (mixed catalog units). Transfers and
+                  other types are not included.
+                </p>
+              </div>
+              <ChartPeriodToolbar
+                pathname="/dashboard"
+                mode={data.chartPeriod.mode}
+                offset={data.chartPeriod.offset}
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <StockQuantityTrendChart
+              data={data.quantityChartData}
+              xGranularity={data.chartPeriod.bucket === "month" ? "month" : "day"}
+              unitSymbol=""
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">Receive backlog age</CardTitle>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Purchase orders with status ORDERED or PARTIALLY_RECEIVED (still waiting on goods).
+              Buckets use calendar days since the PO was last updated — same thresholds as the
+              manager hub (Due soon ≥4d, Over SLA ≥7d).
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ReceiveBacklogAgeChart buckets={data.receiveBacklogBuckets} />
+            <Button variant="outline" size="sm" className="w-full" asChild>
+              <Link href="/purchase-orders">Open purchase orders</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* ── Recent Movements ── */}
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
@@ -382,7 +507,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                         <StatusBadge status={m.type} />
                       </td>
                       <td className="px-4 py-2.5 font-mono font-medium">
-                        {m.type === "OUT" ? "-" : "+"}
+                        {movementQuantityDisplayPrefix(m.type)}
                         {formatQuantityNbNo(Number(m.quantity), m.stock.product.unit.symbol)}{" "}
                         {m.stock.product.unit.symbol}
                       </td>

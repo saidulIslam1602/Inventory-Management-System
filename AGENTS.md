@@ -8,6 +8,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Database migrations (Prisma)
 
+- **Node.js:** Prisma 7.x expects **Node 22+** (see `package.json` `engines` and `.nvmrc`). On **Node 18**, raw `npx prisma …` can crash with `ERR_REQUIRE_ESM` / `zeptomatch`; use **`npm run db:migrate:deploy`** / other `db:*` scripts (they set `NODE_OPTIONS=--experimental-require-module`), or upgrade Node.
 - **New empty database:** run `npm run db:migrate:deploy` (or `npx prisma migrate deploy`). The single migration `20250512120000_init_baseline` creates the full schema from zero.
 - **Existing database that already matches `schema.prisma` but has no / different migration history:** do **not** run deploy blindly (DDL may conflict). Mark the baseline as already applied:  
   `npx prisma migrate resolve --applied 20250512120000_init_baseline`  
