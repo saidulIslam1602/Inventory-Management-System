@@ -10,11 +10,15 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import authConfig from "@/lib/auth.config";
+import { resolveUseSecureCookies } from "@/lib/auth-cookie-policy";
 import { prisma } from "@/lib/db";
 import { loginSchema } from "@/lib/validations/auth";
 
+const useSecureCookies = resolveUseSecureCookies();
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
+  ...(useSecureCookies !== undefined ? { useSecureCookies } : {}),
 
   providers: [
     Credentials({

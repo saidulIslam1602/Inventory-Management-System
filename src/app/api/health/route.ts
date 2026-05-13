@@ -8,33 +8,34 @@
  *
  * Returns 200 when the app and DB connection are healthy.
  * Returns 503 if the DB cannot be reached.
+ *
+ * Optional JSON field **`revision`** when **`APP_VERSION`** or common CI env vars are set
+ * (see `deployment-meta.ts`, `docs/application-observability.md`).
  */
 
 import { NextResponse } from "next/server";
+import { getDeploymentRevision } from "@/lib/deployment-meta";
 import { prisma } from "@/lib/db";
+
+function healthPayload(status: "ok" | "error", extras: Record<string, unknown>) {
+  const revision = getDeploymentRevision();
+  return {
+    status,
+    service: "aqila-ims",
+    timestamp: new Date().toISOString(),
+    ...(revision ? { revision } : {}),
+    ...extras,
+  };
+}
 
 export async function GET() {
   try {
-    // Verify DB connectivity with a lightweight query
     await prisma.$queryRaw`SELECT 1`;
 
-    return NextResponse.json(
-      {
-        status: "ok",
-        service: "aqila-ims",
-        timestamp: new Date().toISOString(),
-      },
-      { status: 200 }
-    );
+    return NextResponse.json(healthPayload("ok", {}), { status: 200 });
   } catch {
-    return NextResponse.json(
-      {
-        status: "error",
-        service: "aqila-ims",
-        message: "Database connection failed",
-        timestamp: new Date().toISOString(),
-      },
-      { status: 503 }
-    );
+    return NextResponse.json(healthPayload("error", { message: "Database connection failed" }), {
+      status: 503,
+    });
   }
 }

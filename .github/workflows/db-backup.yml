@@ -1,0 +1,97 @@
+name: Database logical backup
+
+# Runs **`scripts/pg-backup.sh`** on GitHub-hosted runners (needs **`pg_dump`**).
+#
+# Secrets
+# - **`DATABASE_BACKUP_URL`** — Postgres URL with **read** access (prefer dedicated backup role).
+#
+# Repository **Variables** (Settings → Secrets and variables → Actions → Variables)
+# - **`BACKUP_SCHEDULE_ENABLED`** — set to **`true`** to allow the daily **`schedule`** trigger (manual **`workflow_dispatch`** always runs).
+# - **`BACKUP_UPLOAD`** — omit / `artifact-only` | `azure` | `s3` | `azure+s3`
+# - **`AZURE_BACKUP_CONTAINER`** — required when upload includes `azure` (container must exist).
+# - **`S3_BACKUP_BUCKET`** — required when upload includes `s3`.
+# - **`S3_BACKUP_PREFIX`** — optional key prefix (no leading slash; trailing slash optional).
+# - **`AWS_BACKUP_REGION`** — required for S3 upload (e.g. `eu-north-1`).
+#
+# Secrets for durable storage (when **`BACKUP_UPLOAD`** targets cloud upload)
+# - **`AZURE_BACKUP_STORAGE_CONNECTION_STRING`** — Azure Storage account connection string with write to the container.
+# - **`AWS_BACKUP_ACCESS_KEY_ID`** / **`AWS_BACKUP_SECRET_ACCESS_KEY`** — IAM user or keys scoped to `s3:PutObject` on the backup prefix.
+#
+# Artifact retention stays short (7 days); object storage holds real retention per your lifecycle rules.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily 04:15 UTC — runs only when variable **`BACKUP_SCHEDULE_ENABLED`** is **`true`** (see docs).
+    - cron: "15 4 * * *"
+
+concurrency:
+  group: db-backup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pg_dump:
+    # Avoid failing scheduled runs before **`DATABASE_BACKUP_URL`** / schedule toggle is configured.
+    if: ${{ github.event_name != 'schedule' || vars.BACKUP_SCHEDULE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pg_dump client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+
+      - name: Backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_BACKUP_URL }}
+        run: ./scripts/pg-backup.sh "${{ github.workspace }}/aqila_backup.dump"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pg-custom-dump
+          path: aqila_backup.dump
+          retention-days: 7
+
+      - name: Install Azure CLI (Blob upload)
+        if: ${{ vars.BACKUP_UPLOAD == 'azure' || vars.BACKUP_UPLOAD == 'azure+s3' }}
+        run: curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+      - name: Upload backup to Azure Blob Storage
+        if: ${{ vars.BACKUP_UPLOAD == 'azure' || vars.BACKUP_UPLOAD == 'azure+s3' }}
+        env:
+          AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_BACKUP_STORAGE_CONNECTION_STRING }}
+          AZURE_BACKUP_CONTAINER: ${{ vars.AZURE_BACKUP_CONTAINER }}
+        run: |
+          set -euo pipefail
+          : "${AZURE_STORAGE_CONNECTION_STRING:?Set encrypted secret AZURE_BACKUP_STORAGE_CONNECTION_STRING}"
+          : "${AZURE_BACKUP_CONTAINER:?Set variable AZURE_BACKUP_CONTAINER}"
+          BLOB="aqila-ims/$(date -u +%Y%m%dT%H%M%SZ)_run-${{ github.run_id }}.dump"
+          az storage blob upload \
+            --connection-string "$AZURE_STORAGE_CONNECTION_STRING" \
+            --container-name "$AZURE_BACKUP_CONTAINER" \
+            --name "$BLOB" \
+            --file aqila_backup.dump \
+            --overwrite
+
+      - name: Configure AWS credentials (S3 upload)
+        if: ${{ vars.BACKUP_UPLOAD == 's3' || vars.BACKUP_UPLOAD == 'azure+s3' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_BACKUP_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_BACKUP_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_BACKUP_REGION }}
+
+      - name: Upload backup to S3
+        if: ${{ vars.BACKUP_UPLOAD == 's3' || vars.BACKUP_UPLOAD == 'azure+s3' }}
+        env:
+          BUCKET: ${{ vars.S3_BACKUP_BUCKET }}
+          PREFIX: ${{ vars.S3_BACKUP_PREFIX }}
+        run: |
+          set -euo pipefail
+          : "${BUCKET:?Set variable S3_BACKUP_BUCKET}"
+          P="${PREFIX:-}"
+          P="${P#/}"
+          if [ -n "$P" ]; then P="${P%/}/"; fi
+          KEY="${P}aqila-ims/$(date -u +%Y%m%dT%H%M%SZ)_run-${{ github.run_id }}.dump"
+          aws s3 cp aqila_backup.dump "s3://${BUCKET}/${KEY}"

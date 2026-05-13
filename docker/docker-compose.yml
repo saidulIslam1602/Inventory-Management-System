@@ -9,6 +9,9 @@
 # Usage:
 #   Development: docker compose up
 #   Production:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# The app image entrypoint runs `prisma migrate deploy` on boot (see docker/entrypoint.sh).
+# DBs created only with `db push` may need baseline handling — see AGENTS.md (Prisma migrations).
 # ──────────────────────────────────────────────────────────────────────────────
 
 services:

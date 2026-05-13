@@ -1,8 +1,20 @@
 import type { NextConfig } from "next";
+import { securityHeaderPairs } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
   // Standalone output for Docker deployment — creates a minimal self-contained build
   output: "standalone",
+
+  poweredByHeader: false,
+
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaderPairs(),
+      },
+    ];
+  },
 
   // Disable Next.js telemetry in CI/prod
   experimental: {

@@ -25,5 +25,6 @@ export const UserMessage = {
     invalidExportFilters: "Invalid export filters.",
     noEmployeeLinked: "No employee profile is linked to your account.",
     cronNotConfigured: "Scheduled email is not configured on the server.",
+    cronUnauthorized: "Invalid or missing scheduler credentials.",
   },
 } as const;

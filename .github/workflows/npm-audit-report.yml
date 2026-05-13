@@ -1,0 +1,30 @@
+name: NPM audit report
+
+# Weekly advisory dump (**does not** fail the repo — CI gate stays `audit:ci` on **`high`**).
+
+on:
+  schedule:
+    - cron: "25 7 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Full npm audit (JSON)
+        run: npm audit --json > npm-audit.json || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-json
+          path: npm-audit.json
+          retention-days: 30

@@ -21,7 +21,7 @@
  * **Principle:** least privilege — VIEWER is observer-only without pricing/spend surfaces;
  * STAFF is operational without spreadsheet-scale financial extraction (management handles audits/reports).
  *
- * Edge: `proxy.ts`. **`/api/*`** skips middleware — each Route Handler must call `auth()` + these helpers.
+ * Edge: `proxy.ts` forwards **`x-request-id`** for `/api/*`; each Route Handler must call `auth()` + these helpers.
  */
 
 export type AppRole = "ADMIN" | "MANAGER" | "STAFF" | "VIEWER";

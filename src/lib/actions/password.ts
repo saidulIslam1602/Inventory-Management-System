@@ -2,6 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import { AuditEventCategory } from "@prisma/client";
+import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { extractAuditMetaFromNextHeaders, recordAuditEventSafe } from "@/lib/audit/record-event";
@@ -13,6 +14,11 @@ import {
   forgotPasswordSchema,
   resetPasswordWithOtpSchema,
 } from "@/lib/validations/auth";
+import {
+  checkForgotPasswordRateLimit,
+  checkResetPasswordOtpRateLimit,
+  rateLimitedActionMessage,
+} from "@/lib/auth-rate-limit";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
 
@@ -35,6 +41,12 @@ async function briefDelay(): Promise<void> {
 export async function requestPasswordResetOtp(
   formData: unknown
 ): Promise<ActionResult<{ devOtp?: string }>> {
+  const hdrs = await headers();
+  const forgotRl = await checkForgotPasswordRateLimit(hdrs);
+  if (forgotRl) {
+    return { success: false, error: rateLimitedActionMessage(forgotRl) };
+  }
+
   const parsed = forgotPasswordSchema.safeParse(formData);
   if (!parsed.success) {
     return {
@@ -105,6 +117,12 @@ export async function requestPasswordResetOtp(
 }
 
 export async function resetPasswordWithOtp(formData: unknown): Promise<ActionResult> {
+  const hdrs = await headers();
+  const resetRl = await checkResetPasswordOtpRateLimit(hdrs);
+  if (resetRl) {
+    return { success: false, error: rateLimitedActionMessage(resetRl) };
+  }
+
   const parsed = resetPasswordWithOtpSchema.safeParse(formData);
   if (!parsed.success) {
     return {

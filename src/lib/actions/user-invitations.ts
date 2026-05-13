@@ -2,6 +2,7 @@
 
 import bcrypt from "bcryptjs";
 import { AuditEventCategory, UserRole } from "@prisma/client";
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -14,6 +15,11 @@ import {
   createUserInvitationSchema,
   revokeUserInvitationSchema,
 } from "@/lib/validations/user-invitation";
+import {
+  checkInviteAcceptRateLimit,
+  checkInviteCreateRateLimit,
+  rateLimitedActionMessage,
+} from "@/lib/auth-rate-limit";
 import { canAccessAdminSettings } from "@/lib/rbac";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
@@ -47,6 +53,12 @@ function roleLabel(role: UserRole): string {
 export async function createUserInvitation(
   formData: unknown
 ): Promise<ActionResult<{ devInviteUrl?: string }>> {
+  const hdrs = await headers();
+  const inviteRl = await checkInviteCreateRateLimit(hdrs);
+  if (inviteRl) {
+    return { success: false, error: rateLimitedActionMessage(inviteRl) };
+  }
+
   const session = await auth();
   if (!canAccessAdminSettings(session?.user?.role)) {
     return { success: false, error: UserMessage.permission.denied };
@@ -201,6 +213,12 @@ export async function revokeUserInvitation(formData: unknown): Promise<ActionRes
 }
 
 export async function acceptUserInvitation(formData: unknown): Promise<ActionResult> {
+  const hdrs = await headers();
+  const acceptRl = await checkInviteAcceptRateLimit(hdrs);
+  if (acceptRl) {
+    return { success: false, error: rateLimitedActionMessage(acceptRl) };
+  }
+
   const parsed = acceptUserInvitationSchema.safeParse(formData);
   if (!parsed.success) {
     return {

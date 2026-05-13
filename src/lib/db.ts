@@ -5,12 +5,14 @@
  * hot-reload (which would exhaust the PostgreSQL connection pool quickly).
  * In production, a single module-level instance is used.
  *
- * Prisma v7 reads the DATABASE_URL from the environment automatically
- * via the prisma.config.ts datasource configuration.
+ * Uses `@prisma/adapter-pg` with a **`pg.Pool`** sized via env (see `pgPoolConfigFromEnv`).
+ * Runtime connections use **`DATABASE_URL`** (often a pooler URL). Prisma CLI migrations
+ * read **`DATABASE_DIRECT_URL`** when set — see `prisma.config.ts` and `docs/database-connection-pooling.md`.
  */
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
+import { pgPoolConfigFromEnv } from "@/lib/db-pool-config";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -37,7 +39,7 @@ const connectionString = resolveDatabaseUrl();
 export const prisma: PrismaClient =
   globalForPrisma.prisma ??
   new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: new PrismaPg(pgPoolConfigFromEnv(connectionString)),
     log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
   });
 

@@ -15,5 +15,6 @@ This version has breaking changes — APIs, conventions, and file structure may 
   Remove any orphan rows in `_prisma_migrations` for migration names that no longer exist in `prisma/migrations/`.
 - **Ongoing changes:** add new migrations with `npx prisma migrate dev --name <meaningful_name>` and deploy with `db:migrate:deploy`. Avoid `db push` on production-like databases.
 - **Local reset:** `npx prisma migrate reset` reapplies all migrations from scratch (destructive; development only).
+- **Pooler / Neon-style setups:** set **`DATABASE_URL`** for the app (pooled) and optional **`DATABASE_DIRECT_URL`** for migrations — [`prisma.config.ts`](prisma.config.ts) prefers **`DATABASE_DIRECT_URL`** when present; see [`docs/database-connection-pooling.md`](docs/database-connection-pooling.md).
 
 Portal / ops backlog: [docs/portal-high-impact.md](docs/portal-high-impact.md) (done vs next).

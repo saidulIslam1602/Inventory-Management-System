@@ -11,12 +11,14 @@ const config: Config = {
     "^@/(.*)$": "<rootDir>/src/$1",
   },
   testMatch: ["**/__tests__/**/*.[jt]s?(x)", "**/?(*.)+(spec|test).[jt]s?(x)"],
+  testPathIgnorePatterns: ["<rootDir>/tests/e2e/", "<rootDir>/tests/integration/"],
   collectCoverageFrom: [
     "src/**/*.{ts,tsx}",
     "!src/**/*.d.ts",
     "!src/**/index.ts",
     "!src/app/**", // Next.js pages are covered by e2e
   ],
+  modulePathIgnorePatterns: ["<rootDir>/.next/", "<rootDir>/docker/"],
 };
 
 export default createJestConfig(config);

@@ -26,9 +26,11 @@ export function LoginForm() {
   const urlErrorMessage =
     urlAuthError === "Configuration"
       ? "The server blocked sign-in because the request host was not trusted. This is now configured—refresh the page and try again."
-      : urlAuthError
-        ? `Sign-in failed (${urlAuthError}). Try again or contact support.`
-        : null;
+      : urlAuthError === "RateLimited"
+        ? "Too many sign-in attempts from this network. Wait a few minutes and try again."
+        : urlAuthError
+          ? `Sign-in failed (${urlAuthError}). Try again or contact support.`
+          : null;
   const [error, setError] = useState<string | null>(null);
 
   const {
@@ -46,7 +48,11 @@ export function LoginForm() {
     });
 
     if (result?.error) {
-      setError("Invalid email or password. Please try again.");
+      setError(
+        result.error === "RateLimited"
+          ? "Too many sign-in attempts from this network. Wait a few minutes and try again."
+          : "Invalid email or password. Please try again."
+      );
       return;
     }
     const session = await getSession();

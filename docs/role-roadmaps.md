@@ -1,6 +1,6 @@
 # Role roadmaps (index)
 
-Per-role trackers with **`Done` · `In progress` · `Not started` · `Deferred`** lists. Cross-role backlog: [`portal-high-impact.md`](./portal-high-impact.md).
+Per-role trackers with **`Done` · `In progress` · `Not started` · `Deferred`** lists. Cross-role backlog: [`portal-high-impact.md`](./portal-high-impact.md). Production checklist: [`production-readiness.md`](./production-readiness.md).
 
 | Role        | Doc                                                        | Primary routes / focus                          |
 | ----------- | ---------------------------------------------------------- | ----------------------------------------------- |

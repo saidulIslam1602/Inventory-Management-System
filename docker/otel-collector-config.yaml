@@ -1,0 +1,23 @@
+# Minimal OpenTelemetry Collector — dev/staging: receives OTLP HTTP on :4318 and logs spans.
+# Run alongside the app (see docs/application-observability.md).
+#
+# Production: point the app at a vendor-managed collector (Grafana, Honeycomb, Azure Monitor
+# export pipeline, etc.) instead of running this container.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]

@@ -3,6 +3,8 @@
  * Used by `proxy.ts` (Next.js 16+). Must stay free of Node built-ins for the Edge bundle.
  *
  * Session data lives in a signed JWT; full sign-in still runs in `auth.ts` with credentials + DB.
+ *
+ * HTTPS / reverse proxies / cookie flags: docs/https-and-cookies.md
  */
 
 import type { NextAuthConfig } from "next-auth";

@@ -51,7 +51,15 @@ export async function recordAuditEventSafe(input: RecordAuditEventInput): Promis
       },
     });
   } catch (e) {
-    console.error("[audit_event]", e);
+    void (async () => {
+      try {
+        const { requestLogger } = await import("@/lib/request-log");
+        (await requestLogger()).error({ err: e }, "audit_event persist failed");
+      } catch {
+        const { logger } = await import("@/lib/logger");
+        logger.error({ err: e }, "audit_event persist failed");
+      }
+    })();
   }
 }
 
