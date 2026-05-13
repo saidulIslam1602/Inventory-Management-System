@@ -1,10 +1,11 @@
 "use server";
 
+import { AuditEventCategory, UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { UserRole } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { extractAuditMetaFromNextHeaders, recordAuditEventSafe } from "@/lib/audit/record-event";
 import { createEmployeeSchema, updateEmployeeSchema } from "@/lib/validations/employee";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
@@ -90,13 +91,37 @@ export async function createEmployee(formData: unknown): Promise<ActionResult<{ 
           departmentId: parsed.data.departmentId ?? null,
         },
       });
-      return employee;
+      return {
+        employeeId: employee.id,
+        userId: user.id,
+        employeeCode: employee.employeeCode,
+        role: parsed.data.role,
+      };
+    });
+
+    const auditMeta = await extractAuditMetaFromNextHeaders();
+    await recordAuditEventSafe({
+      actorUserId: session!.user!.id,
+      actorEmail: session!.user!.email,
+      category: AuditEventCategory.DATA,
+      action: "employee.create",
+      targetType: "Employee",
+      targetId: result.employeeId,
+      summary: `Employee ${result.employeeCode} created (${parsed.data.firstName} ${parsed.data.lastName}, ${result.role}).`,
+      metadata: {
+        employeeId: result.employeeId,
+        userId: result.userId,
+        employeeCode: result.employeeCode,
+        role: result.role,
+      },
+      ...auditMeta,
     });
 
     revalidatePath("/employees");
+    revalidatePath("/settings/audit-log");
     return {
       success: true,
-      data: { id: result.id },
+      data: { id: result.employeeId },
       message:
         "Employee was created successfully. They will be prompted to set a new password when they first sign in.",
     };
@@ -178,8 +203,27 @@ export async function updateEmployee(formData: unknown): Promise<ActionResult> {
       });
     });
 
+    const auditMeta = await extractAuditMetaFromNextHeaders();
+    await recordAuditEventSafe({
+      actorUserId: session!.user!.id,
+      actorEmail: session!.user!.email,
+      category: AuditEventCategory.DATA,
+      action: "employee.update",
+      targetType: "Employee",
+      targetId: emp.id,
+      summary: `Employee ${parsed.data.employeeCode} updated.`,
+      metadata: {
+        employeeId: emp.id,
+        userId: emp.userId,
+        roleChangedTo: parsed.data.role,
+        passwordRotated: Boolean(passwordHash),
+      },
+      ...auditMeta,
+    });
+
     revalidatePath("/employees");
     revalidatePath(`/employees/${emp.id}`);
+    revalidatePath("/settings/audit-log");
     return { success: true, data: undefined, message: "Employee was saved successfully." };
   } catch {
     return {

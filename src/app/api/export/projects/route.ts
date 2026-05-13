@@ -12,6 +12,7 @@ import { buildProjectWhere } from "@/lib/queries/projects-list";
 import { projectsExportQuerySchema } from "@/lib/validations/export-queries";
 import { UserMessage } from "@/lib/user-messages";
 import { canExportFinancialCsv } from "@/lib/rbac";
+import { auditCsvExportDownload } from "@/lib/audit/record-event";
 
 const EXPORT_CAP = 50_000;
 
@@ -102,6 +103,14 @@ export async function GET(req: Request) {
 
   const csv = withUtf8Bom(rowsToCsv(headers, data));
   const truncated = rows.length >= EXPORT_CAP;
+
+  await auditCsvExportDownload({
+    req,
+    actor: { id: session.user.id, email: session.user.email },
+    exportKind: "projects_csv",
+    summary: `Exported projects CSV (${rows.length} rows${truncated ? ", truncated" : ""}).`,
+    metadata: { filters: filters.data, rowCount: rows.length, truncated },
+  });
 
   return new NextResponse(csv, {
     status: 200,

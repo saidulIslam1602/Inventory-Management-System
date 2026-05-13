@@ -12,7 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin, Tag, Ruler, Users, Bell } from "lucide-react";
 import { getAppSettings } from "@/lib/app-settings";
 import { ExceptionThresholdsForm } from "@/components/settings/exception-thresholds-form";
+import {
+  UserInvitationsAdmin,
+  type PendingInvitationRow,
+} from "@/components/settings/user-invitations-admin";
+import { FeatureFlagsForm } from "@/components/settings/feature-flags-form";
+import { MaintenanceBannerForm } from "@/components/settings/maintenance-banner-form";
 import { canAccessSettingsPage } from "@/lib/rbac";
+import { getResolvedFeatureFlags } from "@/lib/feature-flags-server";
+import { FEATURE_FLAG_KEYS } from "@/lib/feature-flags";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -25,7 +33,16 @@ export default async function SettingsPage() {
 
   const isAdmin = session.user.role === "ADMIN";
 
-  const [locations, categories, units, users, departments, appSettings] = await Promise.all([
+  const [
+    locations,
+    categories,
+    units,
+    users,
+    departments,
+    appSettings,
+    pendingInvitations,
+    resolvedFeatureFlags,
+  ] = await Promise.all([
     prisma.location.findMany({ orderBy: { name: "asc" } }),
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     prisma.unit.findMany({ orderBy: { name: "asc" } }),
@@ -35,6 +52,49 @@ export default async function SettingsPage() {
     }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
     getAppSettings(),
+    isAdmin
+      ? prisma.userInvitation.findMany({
+          where: {
+            consumedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            emailNorm: true,
+            role: true,
+            expiresAt: true,
+            invitedBy: { select: { name: true, email: true } },
+          },
+        })
+      : Promise.resolve([]),
+    getResolvedFeatureFlags(),
+  ]);
+
+  const pendingInvitationRows: PendingInvitationRow[] = pendingInvitations.map((inv) => ({
+    id: inv.id,
+    emailNorm: inv.emailNorm,
+    role: inv.role,
+    expiresAt: inv.expiresAt.toISOString(),
+    invitedByLabel: inv.invitedBy.name?.trim() || inv.invitedBy.email,
+  }));
+
+  const featureFlagsFormRemountKey = FEATURE_FLAG_KEYS.map((k) =>
+    resolvedFeatureFlags[k] ? "1" : "0"
+  ).join("|");
+
+  const maintenanceBannerInitial = {
+    maintenanceBannerEnabled: appSettings.maintenanceBannerEnabled,
+    maintenanceBannerMessage: appSettings.maintenanceBannerMessage,
+    maintenanceBannerStartsAt: appSettings.maintenanceBannerStartsAt?.toISOString() ?? "",
+    maintenanceBannerEndsAt: appSettings.maintenanceBannerEndsAt?.toISOString() ?? "",
+  };
+  const maintenanceBannerFormRemountKey = JSON.stringify([
+    maintenanceBannerInitial.maintenanceBannerEnabled,
+    maintenanceBannerInitial.maintenanceBannerMessage,
+    maintenanceBannerInitial.maintenanceBannerStartsAt,
+    maintenanceBannerInitial.maintenanceBannerEndsAt,
   ]);
 
   return (
@@ -50,11 +110,19 @@ export default async function SettingsPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {isAdmin ? (
-          <ExceptionThresholdsForm
-            exceptionStaleSubmitDays={appSettings.exceptionStaleSubmitDays}
-            exceptionOverdueReceiveDays={appSettings.exceptionOverdueReceiveDays}
-            exceptionMinLowStockBranches={appSettings.exceptionMinLowStockBranches}
-          />
+          <>
+            <ExceptionThresholdsForm
+              exceptionStaleSubmitDays={appSettings.exceptionStaleSubmitDays}
+              exceptionOverdueReceiveDays={appSettings.exceptionOverdueReceiveDays}
+              exceptionMinLowStockBranches={appSettings.exceptionMinLowStockBranches}
+            />
+            <MaintenanceBannerForm
+              key={maintenanceBannerFormRemountKey}
+              initial={maintenanceBannerInitial}
+            />
+            <FeatureFlagsForm key={featureFlagsFormRemountKey} initial={resolvedFeatureFlags} />
+            <UserInvitationsAdmin pendingInvitations={pendingInvitationRows} />
+          </>
         ) : (
           <Card className="border-border border shadow-none">
             <CardHeader className="pb-3">

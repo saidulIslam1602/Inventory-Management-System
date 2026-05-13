@@ -1,8 +1,10 @@
 "use server";
 
 import bcrypt from "bcryptjs";
+import { AuditEventCategory } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { extractAuditMetaFromNextHeaders, recordAuditEventSafe } from "@/lib/audit/record-event";
 import { sendPasswordResetOtpEmail } from "@/lib/email/send-password-reset-otp";
 import { isDigestEmailConfigured } from "@/lib/email/nodemailer-transport";
 import { generateNumericOtp, hashOtp, verifyOtpAgainstHash } from "@/lib/auth/otp";
@@ -136,7 +138,7 @@ export async function resetPasswordWithOtp(formData: unknown): Promise<ActionRes
 
   const user = await prisma.user.findFirst({
     where: { email: { equals: emailNorm, mode: "insensitive" } },
-    select: { id: true, isActive: true },
+    select: { id: true, email: true, isActive: true },
   });
 
   if (!user?.isActive) {
@@ -159,6 +161,19 @@ export async function resetPasswordWithOtp(formData: unknown): Promise<ActionRes
   } catch {
     return { success: false, error: "Could not update your password. Try again." };
   }
+
+  const auditMeta = await extractAuditMetaFromNextHeaders();
+  await recordAuditEventSafe({
+    actorUserId: user.id,
+    actorEmail: user.email,
+    category: AuditEventCategory.AUTH,
+    action: "auth.password.reset_via_otp",
+    targetType: "User",
+    targetId: user.id,
+    summary: "Password reset completed via email OTP.",
+    metadata: { channel: "otp" },
+    ...auditMeta,
+  });
 
   return {
     success: true,
@@ -210,6 +225,21 @@ export async function changePassword(formData: unknown): Promise<ActionResult> {
   await prisma.user.update({
     where: { id: session.user.id },
     data: { passwordHash, mustChangePassword: false },
+  });
+
+  const auditMeta = await extractAuditMetaFromNextHeaders();
+  await recordAuditEventSafe({
+    actorUserId: session.user.id,
+    actorEmail: session.user.email,
+    category: AuditEventCategory.AUTH,
+    action: "auth.password.change",
+    targetType: "User",
+    targetId: session.user.id,
+    summary: userRow.mustChangePassword
+      ? "Password set (forced change completed)."
+      : "Password changed while signed in.",
+    metadata: { forcedInitialChange: userRow.mustChangePassword },
+    ...auditMeta,
   });
 
   return { success: true, data: undefined, message: "Your password was updated." };

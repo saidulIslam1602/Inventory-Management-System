@@ -19,6 +19,7 @@ import {
 } from "@/lib/validations/project";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
+import { auditDataChange } from "@/lib/audit/record-event";
 
 // ── Generate project code ─────────────────────────────────────────────────────
 
@@ -75,6 +76,15 @@ export async function createProject(formData: unknown): Promise<ActionResult<{ i
       },
     });
 
+    await auditDataChange({
+      session,
+      action: "project.create",
+      summary: `Created project ${project.projectCode}: ${project.name}.`,
+      targetType: "Project",
+      targetId: project.id,
+      metadata: { projectCode: project.projectCode },
+    });
+
     revalidatePath("/projects");
     return {
       success: true,
@@ -106,10 +116,30 @@ export async function updateProjectStatus(formData: unknown): Promise<ActionResu
   }
 
   try {
+    const proj = await prisma.project.findUnique({
+      where: { id: parsed.data.projectId },
+      select: { projectCode: true, status: true },
+    });
+    if (!proj) return { success: false, error: "That project could not be found." };
+
     await prisma.project.update({
       where: { id: parsed.data.projectId },
       data: { status: parsed.data.status },
     });
+
+    await auditDataChange({
+      session,
+      action: "project.status.update",
+      summary: `${proj.projectCode}: ${proj.status} → ${parsed.data.status}.`,
+      targetType: "Project",
+      targetId: parsed.data.projectId,
+      metadata: {
+        projectCode: proj.projectCode,
+        fromStatus: proj.status,
+        toStatus: parsed.data.status,
+      },
+    });
+
     revalidatePath("/projects");
     return { success: true, data: undefined, message: "Project status was updated." };
   } catch {
@@ -139,7 +169,10 @@ export async function reserveMaterial(formData: unknown): Promise<ActionResult> 
   const { projectId, productId, reservedQuantity } = parsed.data;
 
   try {
-    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, projectCode: true, locationId: true },
+    });
     if (!project) return { success: false, error: "That project could not be found." };
 
     // Find stock at the project's location
@@ -165,7 +198,7 @@ export async function reserveMaterial(formData: unknown): Promise<ActionResult> 
     // Get current unit cost for snapshot
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      select: { unitPrice: true },
+      select: { unitPrice: true, sku: true },
     });
 
     await prisma.$transaction(async (tx) => {
@@ -198,6 +231,21 @@ export async function reserveMaterial(formData: unknown): Promise<ActionResult> 
           projectId,
         },
       });
+    });
+
+    await auditDataChange({
+      session,
+      action: "project.material.reserve",
+      summary: `Reserved ${reservedQuantity} × ${product?.sku ?? productId} for ${project.projectCode}.`,
+      targetType: "Project",
+      targetId: projectId,
+      metadata: {
+        projectCode: project.projectCode,
+        productId,
+        productSku: product?.sku ?? null,
+        reservedQuantity,
+        stockId: stock.id,
+      },
     });
 
     revalidatePath("/projects");
@@ -233,8 +281,8 @@ export async function consumeMaterial(formData: unknown): Promise<ActionResult> 
     const pm = await prisma.projectMaterial.findUnique({
       where: { id: projectMaterialId },
       include: {
-        project: { select: { locationId: true } },
-        product: { select: { id: true } },
+        project: { select: { locationId: true, projectCode: true, id: true } },
+        product: { select: { id: true, sku: true, name: true } },
       },
     });
 
@@ -281,6 +329,20 @@ export async function consumeMaterial(formData: unknown): Promise<ActionResult> 
           projectId: pm.projectId,
         },
       });
+    });
+
+    await auditDataChange({
+      session,
+      action: "project.material.consume",
+      summary: `Consumed ${usedQuantity} of ${pm.product.sku} on ${pm.project.projectCode}.`,
+      targetType: "ProjectMaterial",
+      targetId: projectMaterialId,
+      metadata: {
+        projectCode: pm.project.projectCode,
+        projectId: pm.project.id,
+        productSku: pm.product.sku,
+        quantity: usedQuantity,
+      },
     });
 
     revalidatePath("/projects");

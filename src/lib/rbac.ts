@@ -31,6 +31,16 @@ export function canAccessAdminSettings(role: string | undefined): boolean {
   return role === "ADMIN";
 }
 
+/** Append-only org audit log at `/settings/audit-log`. */
+export function canAccessAuditLogPage(role: string | undefined): boolean {
+  return role === "ADMIN";
+}
+
+/** Data quality consoles — `/settings/data-quality`. */
+export function canAccessDataQualityPage(role: string | undefined): boolean {
+  return role === "ADMIN";
+}
+
 /** Org reference data at `/settings` (locations, users list, taxonomy). STAFF uses field flows only. */
 export function canAccessSettingsPage(role: string | undefined): boolean {
   return role === "ADMIN" || role === "MANAGER" || role === "VIEWER";

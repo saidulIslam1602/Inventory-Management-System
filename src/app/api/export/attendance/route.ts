@@ -12,6 +12,7 @@ import { attendanceLogInclude, buildAttendanceLogWhere } from "@/lib/queries/att
 import { attendanceExportQuerySchema } from "@/lib/validations/export-queries";
 import { UserMessage } from "@/lib/user-messages";
 import { canExportAttendanceCsv } from "@/lib/rbac";
+import { auditCsvExportDownload } from "@/lib/audit/record-event";
 
 const LOOKBACK_DAYS = 90;
 const EXPORT_CAP = 50_000;
@@ -99,6 +100,19 @@ export async function GET(req: Request) {
 
   const csv = withUtf8Bom(rowsToCsv(headers, data));
   const truncated = rows.length >= EXPORT_CAP;
+
+  await auditCsvExportDownload({
+    req,
+    actor: { id: session.user.id, email: session.user.email },
+    exportKind: "attendance_csv",
+    summary: `Exported attendance CSV (${rows.length} rows${truncated ? ", truncated" : ""}).`,
+    metadata: {
+      filters: filters.data,
+      rowCount: rows.length,
+      truncated,
+      scope: session.user.role === "STAFF" ? "self" : "org",
+    },
+  });
 
   return new NextResponse(csv, {
     status: 200,

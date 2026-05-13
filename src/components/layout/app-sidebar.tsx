@@ -25,6 +25,8 @@ import {
   Zap,
   LogOut,
   KeyRound,
+  ScrollText,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -43,7 +45,7 @@ import type { NavItem } from "@/types";
 import type { UserRole } from "@prisma/client";
 import { logout } from "@/lib/actions/auth";
 import { clearAuthPageCaches } from "@/lib/pwa-cache";
-import { canAccessSettingsPage } from "@/lib/rbac";
+import { canAccessAuditLogPage, canAccessDataQualityPage, canAccessSettingsPage } from "@/lib/rbac";
 
 const STAFF_EXCLUDED_HREF = new Set(["/employees", "/reports", "/manager"]);
 
@@ -63,6 +65,7 @@ const NAV_CORE: NavItem[] = [
     href: "/manager",
     icon: Building2,
     roles: ["ADMIN", "MANAGER", "VIEWER"],
+    featureFlag: "managerHub",
   },
   {
     title: "Inventory",
@@ -78,39 +81,56 @@ const NAV_CORE: NavItem[] = [
     title: "Purchase Orders",
     href: "/purchase-orders",
     icon: ShoppingCart,
+    featureFlag: "purchaseOrders",
   },
   {
     title: "Employees",
     href: "/employees",
     icon: Users,
+    featureFlag: "employees",
   },
   {
     title: "Projects",
     href: "/projects",
     icon: FolderKanban,
+    featureFlag: "projects",
   },
   {
     title: "Customers",
     href: "/customers",
     icon: Contact,
+    featureFlag: "customers",
   },
   {
     title: "Reports",
     href: "/reports",
     icon: BarChart3,
+    featureFlag: "reports",
   },
 ];
+
+import type { ResolvedFeatureFlags } from "@/lib/feature-flags";
 
 interface AppSidebarProps {
   userRole: UserRole;
   lowStockCount?: number;
   pendingPOCount?: number;
+  featureFlags: ResolvedFeatureFlags;
 }
 
-export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: AppSidebarProps) {
+export function AppSidebar({
+  userRole,
+  lowStockCount = 0,
+  pendingPOCount = 0,
+  featureFlags,
+}: AppSidebarProps) {
   const pathname = usePathname();
 
+  const isSettingsLeafRoute =
+    pathname.startsWith("/settings/audit-log") || pathname.startsWith("/settings/data-quality");
+
   const navItems = NAV_CORE.filter((item) => {
+    if (item.featureFlag && !featureFlags[item.featureFlag]) return false;
     if (userRole === "STAFF" && STAFF_EXCLUDED_HREF.has(item.href)) return false;
     if (item.roles?.length && !item.roles.includes(userRole)) return false;
     return true;
@@ -189,11 +209,12 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link href="/settings" />}
-                  isActive={pathname.startsWith("/settings")}
+                  isActive={pathname.startsWith("/settings") && !isSettingsLeafRoute}
                   tooltip="Settings"
                   className={cn(
                     "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
                     pathname.startsWith("/settings") &&
+                      !isSettingsLeafRoute &&
                       "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
                   )}
                 >
@@ -201,6 +222,40 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
                   <span>Settings</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {canAccessAuditLogPage(userRole) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link href="/settings/audit-log" />}
+                    isActive={pathname.startsWith("/settings/audit-log")}
+                    tooltip="Audit log"
+                    className={cn(
+                      "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
+                      pathname.startsWith("/settings/audit-log") &&
+                        "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
+                    )}
+                  >
+                    <ScrollText className="h-4 w-4 shrink-0" />
+                    <span>Audit log</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ) : null}
+              {canAccessDataQualityPage(userRole) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link href="/settings/data-quality" />}
+                    isActive={pathname.startsWith("/settings/data-quality")}
+                    tooltip="Data quality"
+                    className={cn(
+                      "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
+                      pathname.startsWith("/settings/data-quality") &&
+                        "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
+                    )}
+                  >
+                    <ClipboardCheck className="h-4 w-4 shrink-0" />
+                    <span>Data quality</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ) : null}
             </SidebarMenu>
           </SidebarGroup>
         ) : null}

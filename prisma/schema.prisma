@@ -19,6 +19,7 @@
 //   ProjectMaterial           — Materials reserved/consumed per project
 //   Notification              — DB-stored alert queue (low-stock, PO events)
 //   PurchaseOrderAuditLog     — Append-only PO status / receipt events (digest + PO detail)
+//   AuditEvent                — Append-only org/security audit (settings, exports, auth, invites, directory CRUD)
 // ──────────────────────────────────────────────────────────────────────────────
 
 generator client {
@@ -103,6 +104,15 @@ enum NotificationType {
   SYSTEM
 }
 
+/// Append-only org / security audit trail (settings, exports, invitations, auth, domain CRUD).
+enum AuditEventCategory {
+  SETTINGS
+  EXPORT
+  SECURITY
+  AUTH
+  DATA
+}
+
 // ─────────────────────────────────────────────
 // AUTH (Auth.js v5 / NextAuth required tables)
 // ─────────────────────────────────────────────
@@ -130,8 +140,49 @@ model User {
   purchaseOrders PurchaseOrder[]
   poAuditLogs    PurchaseOrderAuditLog[]
   notifications  Notification[]
+  invitationsSent UserInvitation[] @relation("UserInvitationsSent")
+  auditEvents     AuditEvent[]
 
   @@map("users")
+}
+
+model AuditEvent {
+  id          String              @id @default(cuid())
+  createdAt   DateTime            @default(now())
+  actorUserId String?
+  actorEmail  String?
+  category    AuditEventCategory
+  action      String              @db.VarChar(128)
+  targetType  String?             @db.VarChar(64)
+  targetId    String?             @db.VarChar(64)
+  summary     String              @db.VarChar(1024)
+  metadata    Json?
+  ipAddress   String?             @db.VarChar(64)
+  userAgent   String?             @db.VarChar(512)
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([category])
+  @@index([actorUserId])
+  @@map("audit_events")
+}
+
+/// Admin-issued invite link: recipient completes sign-up (password + name). SSO/SCIM out of scope for now.
+model UserInvitation {
+  id          String    @id @default(cuid())
+  emailNorm   String
+  role        UserRole
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  revokedAt   DateTime?
+  invitedById String
+  invitedBy   User      @relation("UserInvitationsSent", fields: [invitedById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([emailNorm])
+  @@map("user_invitations")
 }
 
 /// Single-use email OTP for forgot-password (hashed code, time-limited).
@@ -602,6 +653,12 @@ model AppSettings {
   exceptionOverdueReceiveDays     Int      @default(7)
   /// Minimum distinct locations with a sub–reorder SKU to raise multi-branch low-stock exception
   exceptionMinLowStockBranches   Int      @default(2)
+  /// Org-wide feature switches (JSON). Missing keys default to enabled in code.
+  featureFlags                   Json?
+  maintenanceBannerEnabled       Boolean  @default(false)
+  maintenanceBannerMessage       String   @default("")
+  maintenanceBannerStartsAt      DateTime?
+  maintenanceBannerEndsAt        DateTime?
   updatedAt                     DateTime @updatedAt
 
   @@map("app_settings")

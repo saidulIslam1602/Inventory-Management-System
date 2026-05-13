@@ -52,7 +52,8 @@ export default withAuth((req: NextRequest & { auth: { user?: AuthedUser } | null
   const isPublicAuthPath =
     pathname.startsWith("/login") ||
     pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/reset-password");
+    pathname.startsWith("/reset-password") ||
+    pathname.startsWith("/invite");
 
   if (isChangePassword) {
     if (!user) {
@@ -86,6 +87,13 @@ export default withAuth((req: NextRequest & { auth: { user?: AuthedUser } | null
 
   if (pathname.startsWith("/settings") && !canAccessSettingsPage(role)) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
+  if (
+    (pathname.startsWith("/settings/audit-log") || pathname.startsWith("/settings/data-quality")) &&
+    role !== "ADMIN"
+  ) {
+    return NextResponse.redirect(new URL("/settings", req.url));
   }
 
   if (role === "STAFF" && staffBlockedPathname(pathname)) {

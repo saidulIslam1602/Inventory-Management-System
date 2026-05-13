@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import { UserRole } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getResolvedFeatureFlags } from "@/lib/feature-flags-server";
 import { globalSearchQuerySchema } from "@/lib/validations/common";
 import { UserMessage } from "@/lib/user-messages";
 
@@ -53,6 +54,8 @@ export async function GET(req: Request) {
 
   const qTrim = q.trim();
 
+  const flags = await getResolvedFeatureFlags();
+
   const [
     exactIdOrCode,
     containsProducts,
@@ -81,32 +84,36 @@ export async function GET(req: Request) {
       orderBy: { sku: "asc" },
       select: { id: true, name: true, sku: true, barcode: true },
     }),
-    prisma.purchaseOrder.findMany({
-      where: { poNumber: { contains: q, mode: "insensitive" } },
-      take: 8,
-      orderBy: { updatedAt: "desc" },
-      select: { id: true, poNumber: true, status: true },
-    }),
-    prisma.project.findMany({
-      where: {
-        OR: [
-          { name: { contains: q, mode: "insensitive" } },
-          { projectCode: { contains: q, mode: "insensitive" } },
-          { clientName: { contains: q, mode: "insensitive" } },
-          { clientPhone: { contains: q, mode: "insensitive" } },
-        ],
-      },
-      take: 8,
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        projectCode: true,
-        clientName: true,
-        clientPhone: true,
-      },
-    }),
-    role === UserRole.STAFF
+    flags.purchaseOrders
+      ? prisma.purchaseOrder.findMany({
+          where: { poNumber: { contains: q, mode: "insensitive" } },
+          take: 8,
+          orderBy: { updatedAt: "desc" },
+          select: { id: true, poNumber: true, status: true },
+        })
+      : Promise.resolve([]),
+    flags.projects
+      ? prisma.project.findMany({
+          where: {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { projectCode: { contains: q, mode: "insensitive" } },
+              { clientName: { contains: q, mode: "insensitive" } },
+              { clientPhone: { contains: q, mode: "insensitive" } },
+            ],
+          },
+          take: 8,
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            name: true,
+            projectCode: true,
+            clientName: true,
+            clientPhone: true,
+          },
+        })
+      : Promise.resolve([]),
+    role === UserRole.STAFF || !flags.employees
       ? Promise.resolve([])
       : prisma.employee.findMany({
           where: {
@@ -134,19 +141,21 @@ export async function GET(req: Request) {
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
-    prisma.customer.findMany({
-      where: {
-        isActive: true,
-        OR: [
-          { name: { contains: q, mode: "insensitive" } },
-          { email: { contains: q, mode: "insensitive" } },
-          { phone: { contains: q, mode: "insensitive" } },
-        ],
-      },
-      take: 8,
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, email: true, phone: true },
-    }),
+    flags.customers
+      ? prisma.customer.findMany({
+          where: {
+            isActive: true,
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+              { phone: { contains: q, mode: "insensitive" } },
+            ],
+          },
+          take: 8,
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, email: true, phone: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   const exactSkuBarcode =

@@ -19,6 +19,7 @@ import { UserMessage } from "@/lib/user-messages";
 import { canRecordStockMovement } from "@/lib/rbac";
 import type { ActionResult } from "@/types";
 import type { Product } from "@prisma/client";
+import { auditDataChange } from "@/lib/audit/record-event";
 
 // ── Create Product ────────────────────────────────────────────────────────────
 
@@ -65,6 +66,15 @@ export async function createProduct(formData: unknown): Promise<ActionResult<Pro
         supplierId: parsed.data.supplierId || null,
         imageUrl: parsed.data.imageUrl || null,
       },
+    });
+
+    await auditDataChange({
+      session,
+      action: "product.create",
+      summary: `Created product ${product.sku}: ${product.name}.`,
+      targetType: "Product",
+      targetId: product.id,
+      metadata: { sku: product.sku },
     });
 
     revalidatePath("/inventory");
@@ -121,6 +131,15 @@ export async function updateProduct(id: string, formData: unknown): Promise<Acti
       },
     });
 
+    await auditDataChange({
+      session,
+      action: "product.update",
+      summary: `Updated product ${product.sku}: ${product.name}.`,
+      targetType: "Product",
+      targetId: product.id,
+      metadata: { sku: product.sku },
+    });
+
     revalidatePath("/inventory");
     return { success: true, data: product, message: "Product was saved successfully." };
   } catch {
@@ -140,7 +159,21 @@ export async function toggleProductActive(id: string, isActive: boolean): Promis
   }
 
   try {
-    await prisma.product.update({ where: { id }, data: { isActive } });
+    const product = await prisma.product.update({
+      where: { id },
+      data: { isActive },
+      select: { id: true, sku: true, name: true, isActive: true },
+    });
+
+    await auditDataChange({
+      session,
+      action: "product.active_toggle",
+      summary: `${product.isActive ? "Activated" : "Deactivated"} product ${product.sku}: ${product.name}.`,
+      targetType: "Product",
+      targetId: product.id,
+      metadata: { sku: product.sku, isActive: product.isActive },
+    });
+
     revalidatePath("/inventory");
     return {
       success: true,
@@ -187,7 +220,13 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
   const movementUnitCost = type === "IN" && unitCost !== undefined ? unitCost : null;
 
   try {
-    const stock = await prisma.stock.findUnique({ where: { id: stockId } });
+    const stock = await prisma.stock.findUnique({
+      where: { id: stockId },
+      include: {
+        product: { select: { sku: true, name: true } },
+        location: { select: { name: true } },
+      },
+    });
     if (!stock) return { success: false, error: "That stock record could not be found." };
 
     const onHand = Number(stock.quantity);
@@ -304,6 +343,22 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
           data: { quantity: { decrement: quantity } },
         });
       }
+    });
+
+    await auditDataChange({
+      session,
+      action: `stock.movement.${type.toLowerCase()}`,
+      summary: `${type} × ${quantity} for ${stock.product.sku} @ ${stock.location.name}${purchaseOrderId ? " (PO-linked)" : ""}${projectId ? " (project-linked)" : ""}.`,
+      targetType: "Stock",
+      targetId: stockId,
+      metadata: {
+        movementType: type,
+        quantity,
+        productSku: stock.product.sku,
+        locationName: stock.location.name,
+        purchaseOrderId: purchaseOrderId ?? null,
+        projectId: projectId ?? null,
+      },
     });
 
     revalidatePath("/inventory");
@@ -442,6 +497,20 @@ export async function receiveIncomingGoods(
       }
     });
 
+    await auditDataChange({
+      session,
+      action: "inventory.receive_scan",
+      summary: `Goods-in ${quantity} ${product.unit.symbol} for ${product.sku} (${product.name}) at location.`,
+      targetType: "Product",
+      targetId: product.id,
+      metadata: {
+        sku: product.sku,
+        quantity,
+        locationId,
+        unitCostUpdated: resolvedUnitCost !== undefined,
+      },
+    });
+
     revalidatePath("/inventory");
     revalidatePath("/inventory/receive");
     revalidatePath("/dashboard");
@@ -471,10 +540,34 @@ export async function updateReorderPoint(
   }
 
   try {
+    const before = await prisma.stock.findUnique({
+      where: { id: stockId },
+      include: {
+        product: { select: { sku: true, name: true } },
+        location: { select: { name: true } },
+      },
+    });
+    if (!before) return { success: false, error: "That stock record could not be found." };
+
     await prisma.stock.update({
       where: { id: stockId },
       data: { reorderPoint },
     });
+
+    await auditDataChange({
+      session,
+      action: "stock.reorder_point.update",
+      summary: `Reorder point ${Number(before.reorderPoint)} → ${reorderPoint} for ${before.product.sku} @ ${before.location.name}.`,
+      targetType: "Stock",
+      targetId: stockId,
+      metadata: {
+        productSku: before.product.sku,
+        locationName: before.location.name,
+        previous: Number(before.reorderPoint),
+        next: reorderPoint,
+      },
+    });
+
     revalidatePath("/inventory");
     return { success: true, data: undefined, message: "Reorder point was updated successfully." };
   } catch {

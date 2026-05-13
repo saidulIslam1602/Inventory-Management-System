@@ -6,6 +6,7 @@ import type { ActionResult } from "@/types";
 import { UserMessage } from "@/lib/user-messages";
 import { notificationPreferencesInputSchema } from "@/lib/validations/notification-preferences";
 import { revalidatePath } from "next/cache";
+import { auditDataChange } from "@/lib/audit/record-event";
 
 export async function updateMyNotificationPreferences(prefs: unknown): Promise<ActionResult> {
   const session = await auth();
@@ -49,6 +50,20 @@ export async function updateMyNotificationPreferences(prefs: unknown): Promise<A
   await prisma.user.update({
     where: { id: session.user.id },
     data: { notificationPreferences: normalized as object },
+  });
+
+  await auditDataChange({
+    session,
+    action: "user.notification_preferences.update",
+    summary: "Updated notification delivery preferences.",
+    targetType: "User",
+    targetId: session.user.id,
+    metadata: {
+      digestDaily: normalized.digestDaily,
+      emailDigestDaily: normalized.emailDigestDaily,
+      emailApprovalEscalation: normalized.emailApprovalEscalation,
+      instant: normalized.instant,
+    },
   });
 
   revalidatePath("/me");

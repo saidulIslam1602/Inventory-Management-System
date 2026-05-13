@@ -12,6 +12,7 @@ import type {
   AttendanceStatus,
   NotificationType,
 } from "@prisma/client";
+import type { FeatureFlagKey } from "@/lib/feature-flags";
 
 // Re-export Prisma enums for use throughout the app
 export type {
@@ -34,6 +35,8 @@ export interface NavItem {
   children?: NavItem[];
   /** If set, only these roles see the item (STAFF filter still applies). */
   roles?: UserRole[];
+  /** Hide when this feature flag is off (admin-controlled). */
+  featureFlag?: FeatureFlagKey;
 }
 
 // ── API response wrapper ──────────────────────────────────────────────────────

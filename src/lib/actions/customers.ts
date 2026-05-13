@@ -1,8 +1,10 @@
 "use server";
 
+import { AuditEventCategory } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { extractAuditMetaFromNextHeaders, recordAuditEventSafe } from "@/lib/audit/record-event";
 import { createCustomerSchema, updateCustomerSchema } from "@/lib/validations/customer";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
@@ -36,9 +38,24 @@ export async function createCustomer(formData: unknown): Promise<ActionResult<{ 
         isActive: true,
       },
     });
+
+    const auditMeta = await extractAuditMetaFromNextHeaders();
+    await recordAuditEventSafe({
+      actorUserId: session!.user!.id,
+      actorEmail: session!.user!.email,
+      category: AuditEventCategory.DATA,
+      action: "customer.create",
+      targetType: "Customer",
+      targetId: row.id,
+      summary: `Customer created: ${row.name}.`,
+      metadata: { customerId: row.id, name: row.name },
+      ...auditMeta,
+    });
+
     revalidatePath("/customers");
     revalidatePath(`/customers/${row.id}`);
     revalidatePath("/projects");
+    revalidatePath("/settings/audit-log");
     return { success: true, data: { id: row.id }, message: "Customer was created successfully." };
   } catch {
     return {
@@ -80,9 +97,28 @@ export async function updateCustomer(formData: unknown): Promise<ActionResult> {
         isActive: parsed.data.isActive,
       },
     });
+
+    const auditMeta = await extractAuditMetaFromNextHeaders();
+    await recordAuditEventSafe({
+      actorUserId: session!.user!.id,
+      actorEmail: session!.user!.email,
+      category: AuditEventCategory.DATA,
+      action: "customer.update",
+      targetType: "Customer",
+      targetId: parsed.data.id,
+      summary: `Customer updated: ${parsed.data.name.trim()}.`,
+      metadata: {
+        customerId: parsed.data.id,
+        name: parsed.data.name.trim(),
+        active: parsed.data.isActive,
+      },
+      ...auditMeta,
+    });
+
     revalidatePath("/customers");
     revalidatePath(`/customers/${parsed.data.id}`);
     revalidatePath("/projects");
+    revalidatePath("/settings/audit-log");
     return { success: true, data: undefined, message: "Customer was saved successfully." };
   } catch {
     return {

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { UserMessage } from "@/lib/user-messages";
 import { myProfileSchema } from "@/lib/validations/employee-profile";
 import type { ActionResult } from "@/types";
+import { auditDataChange } from "@/lib/audit/record-event";
 
 export async function updateMyEmployeeProfile(formData: unknown): Promise<ActionResult> {
   const session = await auth();
@@ -38,6 +39,15 @@ export async function updateMyEmployeeProfile(formData: unknown): Promise<Action
         address: parsed.data.address ?? null,
         nationality: parsed.data.nationality ?? null,
       },
+    });
+
+    await auditDataChange({
+      session,
+      action: "employee.self_contact.update",
+      summary: "Updated own employee contact fields.",
+      targetType: "Employee",
+      targetId: emp.id,
+      metadata: { scope: "phone_address_nationality" },
     });
 
     revalidatePath("/me");

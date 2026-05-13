@@ -22,6 +22,7 @@ import {
   getOpsLeaderUserIds,
   notifyUsersForInstantPoPreference,
 } from "@/lib/manager/notify-by-preference";
+import { auditDataChange } from "@/lib/audit/record-event";
 
 // ── Generate PO number ────────────────────────────────────────────────────────
 
@@ -77,6 +78,15 @@ export async function createPurchaseOrder(
           })),
         },
       },
+    });
+
+    await auditDataChange({
+      session,
+      action: "po.create",
+      summary: `Created purchase order ${po.poNumber} (${items.length} line(s), total ${totalAmount}).`,
+      targetType: "PurchaseOrder",
+      targetId: po.id,
+      metadata: { poNumber: po.poNumber, lineCount: items.length, totalAmount },
     });
 
     revalidatePath("/purchase-orders");
@@ -183,6 +193,15 @@ export async function advancePOStatus(
         candidateUserIds: [...leaderIds, po.createdById],
       });
     }
+
+    await auditDataChange({
+      session,
+      action: `po.workflow.${action}`,
+      summary: `${po.poNumber}: ${fromStatus} → ${toStatus} (${action}).`,
+      targetType: "PurchaseOrder",
+      targetId: poId,
+      metadata: { poNumber: po.poNumber, fromStatus, toStatus, workflowStep: action },
+    });
 
     revalidatePath("/purchase-orders");
     revalidatePath(`/purchase-orders/${poId}`);
@@ -333,6 +352,9 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
       });
     });
 
+    const receiptLines = items.filter((i) => i.receivedQuantity > 0);
+    const qtySum = receiptLines.reduce((s, i) => s + i.receivedQuantity, 0);
+
     const updatedPo = await prisma.purchaseOrder.findUnique({
       where: { id: purchaseOrderId },
       select: { poNumber: true, status: true, createdById: true },
@@ -351,6 +373,20 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
         candidateUserIds: [...leaderIds, updatedPo.createdById],
       });
     }
+
+    await auditDataChange({
+      session,
+      action: "po.receive",
+      summary: `Received ${qtySum} units on ${po.poNumber} (${receiptLines.length} line(s)); PO status → ${updatedPo?.status ?? po.status}.`,
+      targetType: "PurchaseOrder",
+      targetId: purchaseOrderId,
+      metadata: {
+        poNumber: po.poNumber,
+        lineCount: receiptLines.length,
+        qtySum,
+        statusAfter: updatedPo?.status ?? po.status,
+      },
+    });
 
     revalidatePath("/purchase-orders");
     revalidatePath("/inventory");
@@ -404,6 +440,15 @@ export async function addPurchaseOrderEscalationNote(formData: unknown): Promise
         kind: "ESCALATION_NOTE",
         details: note,
       },
+    });
+
+    await auditDataChange({
+      session,
+      action: "po.escalation_note.add",
+      summary: "Added escalation note on purchase order.",
+      targetType: "PurchaseOrder",
+      targetId: purchaseOrderId,
+      metadata: { noteLength: note.length },
     });
 
     revalidatePath("/purchase-orders");
