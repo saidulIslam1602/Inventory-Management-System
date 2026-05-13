@@ -335,10 +335,12 @@ Typical secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, plus runtime env mirrori
 
 ### GitHub push and workflow files
 
-If **`git push`** fails with **OAuth … without `workflow` scope**, GitHub is blocking updates to **`.github/workflows/**`\*\* over HTTPS. Fix one of:
+If **`git push`** fails with **OAuth … without `workflow` scope**, GitHub is blocking updates to **`.github/workflows/`** files.
 
-1. **`gh auth refresh -h github.com -s workflow`** — finish the browser/device flow so HTTPS credentials include the workflow scope.
-2. **SSH remote** — run **[`scripts/github-ssh-push-instructions.sh`](scripts/github-ssh-push-instructions.sh)** to print your public key, add it at [GitHub → SSH keys](https://github.com/settings/ssh/new), set **`origin`** to **`git@github.com:saidulIslam1602/Inventory-Management-System.git`**, then **`git push origin main`**.
+Fix **one** of:
+
+1. **HTTPS + `workflow` scope** — run **[`scripts/push-main-with-workflow-scope.sh`](scripts/push-main-with-workflow-scope.sh)** (or **`gh auth refresh -h github.com -s workflow`** yourself), then push over **`https://github.com/...`** so **`gh auth git-credential`** sends an updated token.
+2. **Account SSH key** — run **[`scripts/github-ssh-push-instructions.sh`](scripts/github-ssh-push-instructions.sh)**, add the printed key under **[GitHub → SSH keys](https://github.com/settings/ssh/new)** on your **user** account (not a repo-only deploy key; deploy keys cannot update workflows).
 
 ---
 
