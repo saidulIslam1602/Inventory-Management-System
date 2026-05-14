@@ -81,7 +81,6 @@ export function HeaderNotificationsMenu({ unreadCount }: { unreadCount: number }
     if (!isRead) await markNotificationRead(id);
     setOpen(false);
     router.push(href);
-    router.refresh();
   }
 
   async function onMarkAll() {

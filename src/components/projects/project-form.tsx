@@ -49,7 +49,6 @@ export function ProjectForm({ locations, customers, className }: ProjectFormProp
       return;
     }
     router.push("/projects");
-    router.refresh();
   }
 
   return (

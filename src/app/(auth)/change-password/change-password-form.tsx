@@ -55,7 +55,6 @@ export function ChangePasswordForm() {
     const role = session?.user?.role;
     const next = role === "STAFF" ? "/me" : "/dashboard";
     router.push(next);
-    router.refresh();
   }
 
   return (

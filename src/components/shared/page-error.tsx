@@ -27,6 +27,11 @@ export function PageError({
         {error.digest && (
           <p className="text-muted-foreground/60 mb-3 font-mono text-xs">ref: {error.digest}</p>
         )}
+        {process.env.NODE_ENV === "development" && error.message ? (
+          <pre className="border-border bg-muted/40 text-muted-foreground mb-4 max-h-40 max-w-lg overflow-auto whitespace-pre-wrap rounded-md border p-3 text-left text-xs">
+            {error.message}
+          </pre>
+        ) : null}
         <Button onClick={reset} variant="outline" size="sm">
           Try again
         </Button>

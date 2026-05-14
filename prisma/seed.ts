@@ -26,6 +26,8 @@ import {
   ProjectStatus,
   AttendanceStatus,
   NotificationType,
+  POAuditEventKind,
+  AuditEventCategory,
   Prisma,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -96,6 +98,9 @@ async function main() {
     prisma.attendance.deleteMany(),
     prisma.shift.deleteMany(),
     prisma.notification.deleteMany(),
+    prisma.auditEvent.deleteMany({
+      where: { summary: { contains: "[demo seed]" } },
+    }),
   ]);
 
   await prisma.appSettings.upsert({
@@ -603,6 +608,15 @@ async function main() {
   ]);
   console.log(`   ✓ ${products.length} products created`);
 
+  for (let i = 0; i < products.length; i++) {
+    const p = products[i]!;
+    if (p.barcode) continue;
+    await prisma.product.update({
+      where: { id: p.id },
+      data: { barcode: `7090123${String(1_000_000 + i).slice(1)}` },
+    });
+  }
+
   // ── Users & Employees (before time-series data references users) ─────────
   console.log("👤 Creating users and employees...");
   const passwordHash = await bcrypt.hash("Aqila2026!", 12);
@@ -645,13 +659,19 @@ async function main() {
 
   await prisma.employee.upsert({
     where: { userId: adminUser.id },
-    update: {},
+    update: {
+      phone: "+47 76 06 09 99",
+      address: "Sjøgata 1, 8300 Svolvær",
+      nationality: "Norsk",
+    },
     create: {
       employeeCode: "AQ-0001",
       firstName: "Lars Erik",
       lastName: "Flygel",
       hireDate: new Date("2019-11-01"),
       nationality: "Norsk",
+      phone: "+47 76 06 09 99",
+      address: "Sjøgata 1, 8300 Svolvær",
       userId: adminUser.id,
       locationId: svolvær.id,
       departmentId: departments[5].id,
@@ -660,13 +680,19 @@ async function main() {
 
   await prisma.employee.upsert({
     where: { userId: managerUser.id },
-    update: {},
+    update: {
+      phone: "+47 934 22 118",
+      address: "Storgata 14, 8370 Leknes",
+      nationality: "Norsk",
+    },
     create: {
       employeeCode: "AQ-0002",
       firstName: "Silje",
       lastName: "Nordvik",
       hireDate: new Date("2020-03-15"),
       nationality: "Norsk",
+      phone: "+47 934 22 118",
+      address: "Storgata 14, 8370 Leknes",
       userId: managerUser.id,
       locationId: gravdal.id,
       departmentId: departments[0].id,
@@ -675,49 +701,236 @@ async function main() {
 
   await prisma.employee.upsert({
     where: { userId: staffUser.id },
-    update: {},
+    update: {
+      phone: "+47 901 55 442",
+      address: "Kong Øystein veg 12, 8300 Svolvær",
+      nationality: "Norsk",
+    },
     create: {
       employeeCode: "AQ-0003",
       firstName: "Ole Petter",
       lastName: "Amundsen",
       hireDate: new Date("2021-06-01"),
       nationality: "Norsk",
+      phone: "+47 901 55 442",
+      address: "Kong Øystein veg 12, 8300 Svolvær",
       userId: staffUser.id,
       locationId: svolvær.id,
       departmentId: departments[0].id,
     },
   });
 
-  console.log("   ✓ 3 users and employee profiles created");
+  const extraStaffProfiles: Array<{
+    email: string;
+    name: string;
+    role: UserRole;
+    code: string;
+    firstName: string;
+    lastName: string;
+    deptIdx: number;
+    locationIdx: number;
+    hireDate: Date;
+    phone: string;
+    address: string;
+    nationality: string;
+  }> = [
+    {
+      email: "viewer@aqila.no",
+      name: "Maria Haugen",
+      role: UserRole.VIEWER,
+      code: "AQ-0004",
+      firstName: "Maria",
+      lastName: "Haugen",
+      deptIdx: 5,
+      locationIdx: 1,
+      hireDate: new Date("2022-01-10"),
+      phone: "+47 412 88 901",
+      address: "Torget 3, 8370 Leknes",
+      nationality: "Norsk",
+    },
+    {
+      email: "montør1@aqila.no",
+      name: "Jonas Berg",
+      role: UserRole.STAFF,
+      code: "AQ-0005",
+      firstName: "Jonas",
+      lastName: "Berg",
+      deptIdx: 0,
+      locationIdx: 2,
+      hireDate: new Date("2021-09-01"),
+      phone: "+47 918 44 220",
+      address: "Hamna 7, 8064 Røst",
+      nationality: "Norsk",
+    },
+    {
+      email: "montør2@aqila.no",
+      name: "Eirik Solheim",
+      role: UserRole.STAFF,
+      code: "AQ-0006",
+      firstName: "Eirik",
+      lastName: "Solheim",
+      deptIdx: 3,
+      locationIdx: 3,
+      hireDate: new Date("2020-08-17"),
+      phone: "+47 905 11 773",
+      address: "Rambergveien 22, 8382 Ramberg",
+      nationality: "Norsk",
+    },
+    {
+      email: "alarm@aqila.no",
+      name: "Ingrid Moen",
+      role: UserRole.STAFF,
+      code: "AQ-0007",
+      firstName: "Ingrid",
+      lastName: "Moen",
+      deptIdx: 2,
+      locationIdx: 0,
+      hireDate: new Date("2023-02-01"),
+      phone: "+47 977 60 014",
+      address: "Holmen 5, 8300 Svolvær",
+      nationality: "Norsk",
+    },
+    {
+      email: "vp@aqila.no",
+      name: "Thomas Vik",
+      role: UserRole.MANAGER,
+      code: "AQ-0008",
+      firstName: "Thomas",
+      lastName: "Vik",
+      deptIdx: 4,
+      locationIdx: 0,
+      hireDate: new Date("2018-05-01"),
+      phone: "+47 920 88 441",
+      address: "Sjøgata 8, 8300 Svolvær",
+      nationality: "Norsk",
+    },
+    {
+      email: "lager@aqila.no",
+      name: "Hanne Kristoffersen",
+      role: UserRole.STAFF,
+      code: "AQ-0009",
+      firstName: "Hanne",
+      lastName: "Kristoffersen",
+      deptIdx: 0,
+      locationIdx: 0,
+      hireDate: new Date("2019-03-11"),
+      phone: "+47 934 55 009",
+      address: "Industrivegen 2, 8300 Svolvær",
+      nationality: "Norsk",
+    },
+    {
+      email: "sol@aqila.no",
+      name: "Petra Nilsen",
+      role: UserRole.STAFF,
+      code: "AQ-0010",
+      firstName: "Petra",
+      lastName: "Nilsen",
+      deptIdx: 4,
+      locationIdx: 1,
+      hireDate: new Date("2022-11-15"),
+      phone: "+47 458 90 112",
+      address: "Leknes industriområde, 8370 Leknes",
+      nationality: "Norsk",
+    },
+  ];
 
-  // ── Target stock (kurert for demo: realistiske nivåer per enhet) ───────────
+  const branchByIdx = [svolvær, gravdal, røst, ramberg];
+  for (const row of extraStaffProfiles) {
+    const u = await prisma.user.upsert({
+      where: { email: row.email },
+      update: { passwordHash, mustChangePassword: false, name: row.name, role: row.role },
+      create: {
+        name: row.name,
+        email: row.email,
+        passwordHash,
+        role: row.role,
+        mustChangePassword: false,
+      },
+    });
+    await prisma.employee.upsert({
+      where: { userId: u.id },
+      update: {
+        phone: row.phone,
+        address: row.address,
+        nationality: row.nationality,
+        departmentId: departments[row.deptIdx]!.id,
+        locationId: branchByIdx[row.locationIdx]!.id,
+      },
+      create: {
+        employeeCode: row.code,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        hireDate: row.hireDate,
+        nationality: row.nationality,
+        phone: row.phone,
+        address: row.address,
+        userId: u.id,
+        locationId: branchByIdx[row.locationIdx]!.id,
+        departmentId: departments[row.deptIdx]!.id,
+      },
+    });
+  }
+
+  console.log(`   ✓ ${3 + extraStaffProfiles.length} users and employee profiles`);
+
+  // ── Target stock (every SKU × every branch — presentation-rich inventory grids / CSV)
   type StockTarget = {
     productId: string;
     locationId: string;
     quantity: number;
     reorderPoint: number;
   };
-  const stockTargets: StockTarget[] = [
-    { productId: products[0].id, locationId: svolvær.id, quantity: 2_850, reorderPoint: 600 },
-    { productId: products[1].id, locationId: svolvær.id, quantity: 1_920, reorderPoint: 450 },
-    { productId: products[2].id, locationId: svolvær.id, quantity: 240, reorderPoint: 80 },
-    { productId: products[3].id, locationId: svolvær.id, quantity: 95, reorderPoint: 30 },
-    { productId: products[4].id, locationId: svolvær.id, quantity: 14, reorderPoint: 4 },
-    { productId: products[5].id, locationId: svolvær.id, quantity: 8, reorderPoint: 2 },
-    { productId: products[6].id, locationId: svolvær.id, quantity: 18, reorderPoint: 6 },
-    { productId: products[7].id, locationId: svolvær.id, quantity: 4_200, reorderPoint: 900 },
-    { productId: products[0].id, locationId: gravdal.id, quantity: 1_680, reorderPoint: 400 },
-    { productId: products[2].id, locationId: gravdal.id, quantity: 88, reorderPoint: 28 },
-    { productId: products[4].id, locationId: gravdal.id, quantity: 4, reorderPoint: 3 },
-    { productId: products[5].id, locationId: gravdal.id, quantity: 2, reorderPoint: 2 },
-    { productId: products[8].id, locationId: svolvær.id, quantity: 190, reorderPoint: 40 },
-    { productId: products[9].id, locationId: gravdal.id, quantity: 120, reorderPoint: 32 },
-    { productId: products[10].id, locationId: røst.id, quantity: 24, reorderPoint: 8 },
-    { productId: products[11].id, locationId: ramberg.id, quantity: 4, reorderPoint: 2 },
-    { productId: products[12].id, locationId: svolvær.id, quantity: 920, reorderPoint: 220 },
-    { productId: products[13].id, locationId: gravdal.id, quantity: 12, reorderPoint: 4 },
-    { productId: products[14].id, locationId: svolvær.id, quantity: 9, reorderPoint: 3 },
-  ];
+
+  const branchLocationsForStock = [svolvær, gravdal, røst, ramberg];
+  const stockTargets: StockTarget[] = [];
+
+  function skuStockKind(sku: string): "m" | "esk" | "stk" {
+    if (sku.includes("WAGO")) return "esk";
+    if (sku.includes("NYM") || sku.includes("CAT") || sku.includes("COND")) return "m";
+    return "stk";
+  }
+
+  for (let pi = 0; pi < products.length; pi++) {
+    const product = products[pi]!;
+    const kind = skuStockKind(product.sku);
+    for (let li = 0; li < branchLocationsForStock.length; li++) {
+      const loc = branchLocationsForStock[li]!;
+      const branchFactor = [1.55, 1.05, 0.42, 0.28][li]!;
+      let base: number;
+      let reorder: number;
+      if (kind === "m") {
+        base = Math.round((2200 + pi * 180) * branchFactor);
+        reorder = Math.round((420 + pi * 40) * branchFactor);
+      } else if (kind === "esk") {
+        base = Math.max(8, Math.round((22 + pi * 3) * branchFactor));
+        reorder = Math.max(4, Math.round((7 + pi) * branchFactor));
+      } else {
+        base = Math.max(12, Math.round((48 + pi * 6) * branchFactor));
+        reorder = Math.max(6, Math.round((14 + pi * 2) * branchFactor));
+      }
+      stockTargets.push({
+        productId: product.id,
+        locationId: loc.id,
+        quantity: base,
+        reorderPoint: reorder,
+      });
+    }
+  }
+
+  const [van1, van2] = [locations[4]!, locations[5]!];
+  const vanSkuIdx = [2, 4, 7, 10, 12];
+  for (const van of [van1, van2]) {
+    for (const idx of vanSkuIdx) {
+      const p = products[idx];
+      if (!p) continue;
+      stockTargets.push({
+        productId: p.id,
+        locationId: van.id,
+        quantity: 14 + idx,
+        reorderPoint: 5,
+      });
+    }
+  }
 
   console.log("📊 Ensuring stock rows…");
   for (const t of stockTargets) {
@@ -871,7 +1084,7 @@ async function main() {
   console.log("🧾 Creating purchase orders across the year…");
   const poCreators = [managerUser.id, adminUser.id];
   const poLocations = [svolvær.id, gravdal.id, røst.id];
-  for (let i = 0; i < 42; i++) {
+  for (let i = 0; i < 55; i++) {
     const createdAt = addDays(demoStart, Math.floor(rand() * 360));
     const ageDays = (Date.now() - createdAt.getTime()) / 86400000;
     let status: POStatus = POStatus.RECEIVED;
@@ -886,11 +1099,90 @@ async function main() {
     let total = 0;
     const items: { productId: string; ordered: number; price: number }[] = [];
     for (let L = 0; L < nLines; L++) {
-      const p = products[Math.floor(rand() * Math.min(10, products.length))]!;
+      const p = products[Math.floor(rand() * products.length)]!;
       const ordered = poOrderedQty(p.id);
       const price = Number(p.unitPrice);
       total += ordered * price;
       items.push({ productId: p.id, ordered, price });
+    }
+
+    const createdById = poCreators[Math.floor(rand() * poCreators.length)]!;
+    const tMs = createdAt.getTime();
+
+    const auditLogsCreate: Prisma.PurchaseOrderAuditLogCreateWithoutPurchaseOrderInput[] = [];
+    auditLogsCreate.push({
+      kind: POAuditEventKind.STATUS_CHANGE,
+      fromStatus: null,
+      toStatus: POStatus.SUBMITTED,
+      details: "[demo seed] Registrert i IMS og sendt til godkjenning",
+      actor: { connect: { id: createdById } },
+      createdAt: new Date(tMs + 2 * 3600000),
+    });
+
+    if (status === POStatus.CANCELLED) {
+      auditLogsCreate.push({
+        kind: POAuditEventKind.STATUS_CHANGE,
+        fromStatus: POStatus.SUBMITTED,
+        toStatus: POStatus.CANCELLED,
+        details: "[demo seed] Innkjøp stoppet — prosjekt på vent",
+        actor: { connect: { id: createdById } },
+        createdAt: new Date(tMs + 72 * 3600000),
+      });
+    } else if (status !== POStatus.SUBMITTED) {
+      auditLogsCreate.push({
+        kind: POAuditEventKind.STATUS_CHANGE,
+        fromStatus: POStatus.SUBMITTED,
+        toStatus: POStatus.APPROVED,
+        details: "[demo seed] Budsjett og leverandør bekreftet",
+        actor: { connect: { id: adminUser.id } },
+        createdAt: new Date(tMs + 36 * 3600000),
+      });
+    }
+
+    if (
+      status === POStatus.ORDERED ||
+      status === POStatus.PARTIALLY_RECEIVED ||
+      status === POStatus.RECEIVED
+    ) {
+      auditLogsCreate.push({
+        kind: POAuditEventKind.STATUS_CHANGE,
+        fromStatus: POStatus.APPROVED,
+        toStatus: POStatus.ORDERED,
+        details: "[demo seed] Ordre bekreftet hos leverandør",
+        actor: { connect: { id: managerUser.id } },
+        createdAt: new Date(tMs + 60 * 3600000),
+      });
+    }
+
+    if (status === POStatus.PARTIALLY_RECEIVED) {
+      auditLogsCreate.push({
+        kind: POAuditEventKind.RECEIPT,
+        fromStatus: POStatus.ORDERED,
+        toStatus: POStatus.PARTIALLY_RECEIVED,
+        details: "[demo seed] Dellevering skannet inn på terminal",
+        actor: { connect: { id: staffUser.id } },
+        createdAt: new Date(tMs + 120 * 3600000),
+      });
+    }
+
+    if (status === POStatus.RECEIVED) {
+      auditLogsCreate.push({
+        kind: POAuditEventKind.RECEIPT,
+        fromStatus: POStatus.ORDERED,
+        toStatus: POStatus.RECEIVED,
+        details: "[demo seed] Komplett parti — kvalitetssjekk OK",
+        actor: { connect: { id: staffUser.id } },
+        createdAt: new Date(tMs + 132 * 3600000),
+      });
+    }
+
+    if (status === POStatus.SUBMITTED && rand() < 0.28) {
+      auditLogsCreate.push({
+        kind: POAuditEventKind.ESCALATION_NOTE,
+        details: "[demo seed] Påminnelse: godkjenning >48 timer",
+        actor: { connect: { id: managerUser.id } },
+        createdAt: new Date(tMs + 96 * 3600000),
+      });
     }
 
     await prisma.purchaseOrder.create({
@@ -903,11 +1195,11 @@ async function main() {
             ? addDays(createdAt, 12 + Math.floor(rand() * 8))
             : null,
         totalAmount: new Prisma.Decimal(Math.round(total * 100) / 100),
-        notes: `[demo] Årsbestilling spor ${i + 1}`,
+        notes: `[demo] Årsbestilling spor ${i + 1} · referanse EL-${2400 + i}`,
         createdAt,
         supplierId: rand() < 0.72 ? elektroskandia.id : ahlsell.id,
         locationId: poLocations[Math.floor(rand() * poLocations.length)]!,
-        createdById: poCreators[Math.floor(rand() * poCreators.length)]!,
+        createdById,
         items: {
           create: items.map((it) => ({
             productId: it.productId,
@@ -922,10 +1214,11 @@ async function main() {
             unitPrice: new Prisma.Decimal(it.price),
           })),
         },
+        auditLogs: { create: auditLogsCreate },
       },
     });
   }
-  console.log("   ✓ 42 purchase orders created");
+  console.log("   ✓ 55 purchase orders with audit timeline");
 
   // ── Projects ──────────────────────────────────────────────────────────────
   console.log("📂 Creating projects with history…");
@@ -954,7 +1247,13 @@ async function main() {
         data: {
           name: bp.client,
           phone: `+47 76 ${String(1000 + i).slice(1)} ${String(20 + i).padStart(2, "0")}`,
-          email: i % 2 === 0 ? `kontakt@${slug || "kunde"}.no` : null,
+          email:
+            i % 2 === 0 ? `kontakt@${slug || "kunde"}.no` : `firmapost@${slug || "bedrift"}.no`,
+          address:
+            i % 3 === 0
+              ? `Bedriftsveien ${10 + i}, 8300 Svolvær`
+              : `Industrigata ${5 + (i % 8)}, ${8370 + (i % 5)} Leknes`,
+          notes: "[demo seed] Referansekunde for presentasjon.",
           isActive: true,
         },
       });
@@ -964,7 +1263,7 @@ async function main() {
     demoCustomers.map((c: { id: string; name: string }) => [c.name, c.id] as const)
   );
 
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 30; i++) {
     const bp = projectBlueprints[i % projectBlueprints.length]!;
     const start = addDays(demoStart, 8 + Math.floor(rand() * 320));
     const span = 25 + Math.floor(rand() * 120);
@@ -978,11 +1277,19 @@ async function main() {
     else if (rand() < 0.03) status = ProjectStatus.CANCELLED;
 
     const loc = [svolvær, gravdal, røst, ramberg][Math.floor(rand() * 4)]!;
+    const leadEmp = employees[Math.floor(rand() * employees.length)]!;
+    let mateIx = Math.floor(rand() * employees.length);
+    if (employees[mateIx]!.id === leadEmp.id) mateIx = (mateIx + 1) % employees.length;
+    const mateEmp = employees[mateIx]!;
+
+    const matCount = 2 + Math.floor(rand() * 4);
+    const matProducts = [...products].sort(() => rand() - 0.5).slice(0, matCount);
+
     await prisma.project.create({
       data: {
         projectCode: `PRJ-DEMO-${(8100 + i).toString()}`,
         name: `${bp.name} (#${i + 1})`,
-        description: `[demo] 12-måneders historikk`,
+        description: `[demo] Omfang: materiell, montering og dokumentasjon. Lokasjon: ${loc.name}. Kontraktår 2025–2026.`,
         status,
         startDate: start,
         endDate:
@@ -992,23 +1299,81 @@ async function main() {
               ? null
               : addDays(start, span),
         clientName: bp.client,
-        clientPhone: "76 00 00 00",
+        clientPhone: `+47 9${String(10 + (i % 70)).padStart(2, "0")} ${String(10_000 + i).slice(1)}`,
         customerId: customerIdByName.get(bp.client) ?? null,
         createdAt: addDays(start, -5),
         locationId: loc.id,
         employees: {
           create: [
-            {
-              employeeId: employees[1]!.id,
-              role: "Prosjektleder",
-            },
-            ...(rand() < 0.6 ? [{ employeeId: employees[2]!.id, role: "Montør" }] : []),
+            { employeeId: leadEmp.id, role: "Prosjektleder" },
+            ...(rand() < 0.82 ? [{ employeeId: mateEmp.id, role: "Montør" }] : []),
           ],
+        },
+        materials: {
+          create: matProducts.map((prod) => {
+            const reserved = 5 + Math.floor(rand() * 48);
+            const used = Math.min(reserved + 12, Math.max(2, Math.floor(rand() * (reserved + 28))));
+            return {
+              productId: prod.id,
+              reservedQuantity: new Prisma.Decimal(reserved),
+              usedQuantity: new Prisma.Decimal(used),
+              unitCostAtTime: new Prisma.Decimal(Number(prod.unitPrice)),
+            };
+          }),
         },
       },
     });
   }
-  console.log("   ✓ Demo customers & 24 projects created");
+  console.log("   ✓ Demo customers & 30 projects (material lines + team)");
+
+  console.log("🔗 Linking stock movements to POs and projects (richer CSV reference columns)…");
+  const poLinkIds = (
+    await prisma.purchaseOrder.findMany({
+      where: { status: { in: [POStatus.RECEIVED, POStatus.PARTIALLY_RECEIVED] } },
+      select: { id: true },
+      take: 48,
+    })
+  ).map((r) => r.id);
+  const projectLinkIds = (
+    await prisma.project.findMany({
+      where: {
+        status: { in: [ProjectStatus.IN_PROGRESS, ProjectStatus.COMPLETED, ProjectStatus.ON_HOLD] },
+      },
+      select: { id: true },
+      take: 40,
+    })
+  ).map((r) => r.id);
+
+  if (poLinkIds.length > 0) {
+    const inMoves = await prisma.stockMovement.findMany({
+      where: { type: MovementType.IN },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(70, Math.max(25, poLinkIds.length * 2)),
+      select: { id: true },
+    });
+    for (let i = 0; i < inMoves.length; i++) {
+      await prisma.stockMovement.update({
+        where: { id: inMoves[i]!.id },
+        data: { purchaseOrderId: poLinkIds[i % poLinkIds.length] },
+      });
+    }
+  }
+
+  if (projectLinkIds.length > 0) {
+    const outMoves = await prisma.stockMovement.findMany({
+      where: { type: MovementType.OUT },
+      orderBy: { createdAt: "desc" },
+      take: Math.min(95, Math.max(35, projectLinkIds.length * 3)),
+      select: { id: true },
+    });
+    for (let i = 0; i < outMoves.length; i++) {
+      await prisma.stockMovement.update({
+        where: { id: outMoves[i]!.id },
+        data: { projectId: projectLinkIds[i % projectLinkIds.length] },
+      });
+    }
+  }
+  console.log("   ✓ Movement ↔ PO / project links applied");
 
   // ── Attendance (weekdays, ~1 year) ────────────────────────────────────────
   console.log("🕐 Generating attendance (weekdays, last ~12 months)…");
@@ -1042,7 +1407,10 @@ async function main() {
           checkIn: status === AttendanceStatus.ABSENT ? null : checkIn,
           checkOut,
           hoursWorked: hours != null ? new Prisma.Decimal(Math.round(hours * 100) / 100) : null,
-          notes: status !== AttendanceStatus.PRESENT ? "[demo]" : null,
+          notes:
+            status !== AttendanceStatus.PRESENT
+              ? "[demo seed] Avvik registrert av vaktleder — se HR-protokoll"
+              : null,
         },
       });
       attendanceCount++;
@@ -1052,7 +1420,7 @@ async function main() {
 
   // ── Shifts (sample) ───────────────────────────────────────────────────────
   console.log("📅 Creating sample shifts…");
-  for (let s = 0; s < 60; s++) {
+  for (let s = 0; s < 120; s++) {
     const emp = employees[Math.floor(rand() * employees.length)]!;
     const d0 = addDays(demoStart, Math.floor(rand() * 340));
     const start = addHours(d0, 7);
@@ -1067,7 +1435,7 @@ async function main() {
       },
     });
   }
-  console.log("   ✓ 60 shifts created");
+  console.log("   ✓ 120 shifts created");
 
   // ── Notifications ─────────────────────────────────────────────────────────
   console.log("🔔 Creating notifications…");
@@ -1095,21 +1463,108 @@ async function main() {
     DAILY_DIGEST: ["Daglig sammendrag", "Driftsnotat for deg"],
     SYSTEM: ["Kvartalsrapport klar", "Vedlikeholdsnett nattestopp"],
   };
-  for (let n = 0; n < 48; n++) {
+  const notifRecipients = [adminUser.id, managerUser.id];
+  for (let n = 0; n < 64; n++) {
     const t = notifTypes[Math.floor(rand() * notifTypes.length)]!;
     const titles = notifTitles[t];
     await prisma.notification.create({
       data: {
-        userId: adminUser.id,
+        userId: notifRecipients[n % notifRecipients.length]!,
         type: t,
         title: titles[Math.floor(rand() * titles.length)]!,
-        message: `[demo] Hendelse ${n + 1} i presentasjonsdatasett.`,
+        message: `[demo seed] Hendelse ${n + 1} — presentasjonsdatasett med realistisk tekst.`,
         isRead: rand() < 0.35,
         createdAt: addDays(demoStart, Math.floor(rand() * 365)),
       },
     });
   }
-  console.log("   ✓ 48 notifications created");
+  console.log("   ✓ 64 notifications (admin + manager innboks)");
+
+  console.log("📜 Creating sample org audit events…");
+  await prisma.auditEvent.createMany({
+    data: [
+      {
+        actorUserId: adminUser.id,
+        actorEmail: "admin@aqila.no",
+        category: AuditEventCategory.SETTINGS,
+        action: "demo.exception_thresholds_reviewed",
+        targetType: "AppSettings",
+        targetId: "default",
+        summary:
+          "[demo seed] Gjennomgått unntaksgrenser for manager-hub (innkjøp + lav beholdning).",
+      },
+      {
+        actorUserId: managerUser.id,
+        actorEmail: "manager@aqila.no",
+        category: AuditEventCategory.DATA,
+        action: "demo.customer_master_touchpoint",
+        targetType: "Customer",
+        summary: "[demo seed] Oppdatert kontaktperson hos referansekunde (CRM-sync).",
+      },
+      {
+        actorUserId: adminUser.id,
+        actorEmail: "admin@aqila.no",
+        category: AuditEventCategory.SECURITY,
+        action: "demo.invite_policy_ack",
+        targetType: "OrgPolicy",
+        summary: "[demo seed] Årlig bekreftelse: invitasjonsrutiner og passordkrav.",
+      },
+      {
+        actorUserId: staffUser.id,
+        actorEmail: "staff@aqila.no",
+        category: AuditEventCategory.AUTH,
+        action: "demo.password_rotation_ok",
+        summary: "[demo seed] Passordrotasjon fullført for feltpersonell.",
+      },
+      {
+        actorUserId: managerUser.id,
+        actorEmail: "manager@aqila.no",
+        category: AuditEventCategory.EXPORT,
+        action: "demo.po_csv_ack",
+        targetType: "Export",
+        summary: "[demo seed] Eksporterte innkjøpsliste (CSV) til økonomi — sporbarhet OK.",
+      },
+      {
+        actorUserId: adminUser.id,
+        actorEmail: "admin@aqila.no",
+        category: AuditEventCategory.DATA,
+        action: "demo.product_catalog_refresh",
+        targetType: "Product",
+        summary: "[demo seed] Synkronisert katalogpriser mot leverandørliste Q2.",
+      },
+      {
+        actorUserId: managerUser.id,
+        actorEmail: "manager@aqila.no",
+        category: AuditEventCategory.DATA,
+        action: "demo.project_checkpoint",
+        targetType: "Project",
+        summary: "[demo seed] Milepæl: HMS og materiell kvittert på aktiv arbeidsordre.",
+      },
+      {
+        actorUserId: adminUser.id,
+        actorEmail: "admin@aqila.no",
+        category: AuditEventCategory.SETTINGS,
+        action: "demo.notification_prefs_bulk",
+        summary: "[demo seed] Oppdatert standard varslingspreferanser for nye ledere.",
+      },
+      {
+        actorUserId: staffUser.id,
+        actorEmail: "staff@aqila.no",
+        category: AuditEventCategory.AUTH,
+        action: "demo.mfa_ready_status",
+        summary: "[demo seed] MFA-klarhet verifisert for terminalbruk på lager.",
+      },
+      {
+        actorUserId: managerUser.id,
+        actorEmail: "manager@aqila.no",
+        category: AuditEventCategory.DATA,
+        action: "demo.attendance_exception_closed",
+        targetType: "Attendance",
+        summary: "[demo seed] Lukket avviksmelding — dokumentert i HR.",
+      },
+    ],
+  });
+  console.log("   ✓ Audit event samples for innstillinger → revisjon");
 
   // ── Restore presentation stock quantities (chart data is movements; levels are curated)
   console.log("📦 Applying final stock levels for dashboard / low-stock demo…");
@@ -1123,10 +1578,12 @@ async function main() {
     });
   }
 
-  console.log("\n   Demo credentials:");
-  console.log("   Admin:   admin@aqila.no   / Aqila2026!");
-  console.log("   Manager: manager@aqila.no / Aqila2026!");
-  console.log("   Staff:   staff@aqila.no   / Aqila2026!");
+  console.log("\n   Demo credentials (alle med passord Aqila2026!):");
+  console.log("   Admin:    admin@aqila.no");
+  console.log("   Manager:  manager@aqila.no");
+  console.log("   Staff:    staff@aqila.no");
+  console.log("   Viewer:   viewer@aqila.no");
+  console.log("   Felt:     montør1@aqila.no, montør2@aqila.no, alarm@aqila.no, …");
   console.log("\n✅ Seed complete (~12 months demo data).\n");
 }
 

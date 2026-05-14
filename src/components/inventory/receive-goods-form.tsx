@@ -5,7 +5,7 @@
  * Pre-fills unit cost from product.purchaseUnitCost when set.
  */
 
-import { useCallback, useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { Camera, Loader2, ScanBarcode, Info } from "lucide-react";
 import { previewProductByScanCode, type ProductScanPreview } from "@/lib/actions/inventory";
 import { submitQuickReceiveWithOffline } from "@/lib/receive-offline-submit";
@@ -36,11 +36,13 @@ import {
 } from "@/components/inventory/barcode-camera-scan-dialog";
 
 function useInlineCameraScanEligible(): boolean {
-  return useSyncExternalStore(
-    () => () => {},
-    () => inlineCameraBarcodeScanAvailable(),
-    () => false
-  );
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => {
+      setOk(inlineCameraBarcodeScanAvailable());
+    });
+  }, []);
+  return ok;
 }
 
 interface ReceiveGoodsFormProps {

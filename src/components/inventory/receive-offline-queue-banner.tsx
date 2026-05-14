@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useSyncExternalStore } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
 import { CloudOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -12,12 +12,15 @@ import { flushReceiveOfflineQueue, isNavigatorOffline } from "@/lib/receive-offl
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
+/** Queue count after mount — matches SSR (`0`) then syncs from IndexedDB/localStorage (no hydration drift). */
 function useQueuedReceiveCount(userId: string): number {
-  return useSyncExternalStore(
-    (cb) => subscribeReceiveQueue(userId, cb),
-    () => snapshotReceiveQueueCount(userId),
-    () => 0
-  );
+  const [count, setCount] = React.useState(0);
+  React.useEffect(() => {
+    const sync = () => setCount(snapshotReceiveQueueCount(userId));
+    sync();
+    return subscribeReceiveQueue(userId, sync);
+  }, [userId]);
+  return count;
 }
 
 export function ReceiveOfflineQueueBanner({ userId }: { userId: string }) {

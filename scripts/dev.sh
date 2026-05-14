@@ -14,4 +14,12 @@ if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
   nvm use
 fi
 
-exec "$ROOT/node_modules/.bin/next" dev --port 3010
+PORT="${PORT:-3010}"
+echo ""
+echo "  Aqila IMS — open in your browser:"
+echo "    http://localhost:${PORT}"
+echo ""
+echo "  (This project uses port ${PORT}, not 3000. Keep NEXTAUTH_URL in .env on the same host, e.g. http://localhost:${PORT})"
+echo ""
+
+exec "$ROOT/node_modules/.bin/next" dev --hostname 0.0.0.0 --port "${PORT}"

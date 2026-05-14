@@ -90,32 +90,37 @@ export async function buildOpsDigestLines(): Promise<string[]> {
 }
 
 export async function ensureDailyDigestForUser(userId: string): Promise<void> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { notificationPreferences: true, isActive: true, role: true },
-  });
-  if (!user?.isActive || !wantsDigestDaily(user.notificationPreferences)) return;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { notificationPreferences: true, isActive: true, role: true },
+    });
+    if (!user?.isActive || !wantsDigestDaily(user.notificationPreferences)) return;
 
-  const cooldownSince = subHours(new Date(), DIGEST_COOLDOWN_HOURS);
-  const recent = await prisma.notification.findFirst({
-    where: {
-      userId,
-      type: NotificationType.DAILY_DIGEST,
-      createdAt: { gte: cooldownSince },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  if (recent) return;
+    const cooldownSince = subHours(new Date(), DIGEST_COOLDOWN_HOURS);
+    const recent = await prisma.notification.findFirst({
+      where: {
+        userId,
+        type: NotificationType.DAILY_DIGEST,
+        createdAt: { gte: cooldownSince },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (recent) return;
 
-  const lines = await buildOpsDigestLines();
-  await prisma.notification.create({
-    data: {
-      userId,
-      type: NotificationType.DAILY_DIGEST,
-      title: "Daily ops digest",
-      message: lines.join("\n"),
-      actionHref: canAccessManagerHub(user.role) ? "/manager" : "/dashboard",
-    },
-  });
+    const lines = await buildOpsDigestLines();
+    await prisma.notification.create({
+      data: {
+        userId,
+        type: NotificationType.DAILY_DIGEST,
+        title: "Daily ops digest",
+        message: lines.join("\n"),
+        actionHref: canAccessManagerHub(user.role) ? "/manager" : "/dashboard",
+      },
+    });
+  } catch (err) {
+    // Digest is optional UX — never fail portal/dashboard renders if ops queries glitch.
+    console.error("[daily-digest] ensureDailyDigestForUser:", err);
+  }
 }

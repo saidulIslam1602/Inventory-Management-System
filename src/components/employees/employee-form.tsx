@@ -75,7 +75,6 @@ export function CreateEmployeeForm({ locations, departments, className }: Shared
       return;
     }
     router.push("/employees");
-    router.refresh();
   }
 
   return (
@@ -320,7 +319,6 @@ export function EditEmployeeForm({
       return;
     }
     router.push("/employees");
-    router.refresh();
   }
 
   return (

@@ -236,7 +236,7 @@ npm run db:seed
 npm run dev
 ```
 
-Default dev URL is defined in [`scripts/dev.sh`](scripts/dev.sh) (commonly port **3010** — open the URL printed in the terminal).
+**Dev URL:** **`http://localhost:3010`** (port **3010**, not 3000). [`scripts/dev.sh`](scripts/dev.sh) prints this when you run `npm run dev`. Set **`NEXTAUTH_URL`** in `.env` to the same origin (e.g. `http://localhost:3010`), not `http://127.0.0.1:3010`, or sign-in cookies can fail.
 
 ### Demo users (after seed)
 

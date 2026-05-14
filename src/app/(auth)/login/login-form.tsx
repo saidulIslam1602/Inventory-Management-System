@@ -59,35 +59,42 @@ export function LoginForm({ expectedAuthOrigin, showOriginMismatchHint = false }
 
   async function onSubmit(data: LoginInput) {
     setError(null);
-    const result = await signIn("credentials", {
-      email: data.email,
-      password: data.password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email: data.email,
+        password: data.password,
+        redirect: false,
+      });
 
-    if (result?.error) {
+      if (result?.error) {
+        setError(
+          result.error === "RateLimited"
+            ? "Too many sign-in attempts from this network. Wait a few minutes and try again."
+            : "Invalid email or password. Please try again."
+        );
+        return;
+      }
+      const session = await getSession();
+      if (session?.user?.mustChangePassword) {
+        router.push("/change-password");
+        return;
+      }
+      const role = session?.user?.role;
+      const next =
+        callbackUrl && callbackUrl !== "/dashboard"
+          ? callbackUrl
+          : role === "STAFF"
+            ? "/me"
+            : "/dashboard";
+      router.push(next);
+    } catch (e) {
+      console.error("signIn failed:", e);
       setError(
-        result.error === "RateLimited"
-          ? "Too many sign-in attempts from this network. Wait a few minutes and try again."
-          : "Invalid email or password. Please try again."
+        e instanceof Error
+          ? `Sign-in request failed: ${e.message}. Is the dev server running and PostgreSQL reachable?`
+          : "Sign-in request failed. Check the dev server console and database connection."
       );
-      return;
     }
-    const session = await getSession();
-    if (session?.user?.mustChangePassword) {
-      router.push("/change-password");
-      router.refresh();
-      return;
-    }
-    const role = session?.user?.role;
-    const next =
-      callbackUrl && callbackUrl !== "/dashboard"
-        ? callbackUrl
-        : role === "STAFF"
-          ? "/me"
-          : "/dashboard";
-    router.push(next);
-    router.refresh();
   }
 
   return (

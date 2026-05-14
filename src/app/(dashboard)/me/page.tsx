@@ -287,7 +287,10 @@ export default async function EmployeePortalPage() {
                     checkIn: todayAttendance.checkIn,
                     checkOut: todayAttendance.checkOut,
                     status: todayAttendance.status,
-                    hoursWorked: todayAttendance.hoursWorked,
+                    hoursWorked:
+                      todayAttendance.hoursWorked != null
+                        ? Number(todayAttendance.hoursWorked)
+                        : null,
                   }
                 : null
             }

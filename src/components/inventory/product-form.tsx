@@ -93,7 +93,6 @@ export function ProductForm({
       return;
     }
     router.push("/inventory");
-    router.refresh();
   }
 
   return (
