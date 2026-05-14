@@ -29,16 +29,18 @@ export default {
         token.id = user.id!;
         token.role = user.role;
         token.mustChangePassword = user.mustChangePassword === true;
+        token.isActive = true; // isActive=false is blocked at authorize() — only actives reach here
       }
-      if (
-        trigger === "update" &&
-        updateSession &&
-        typeof updateSession === "object" &&
-        "mustChangePassword" in updateSession
-      ) {
-        token.mustChangePassword = Boolean(
-          (updateSession as { mustChangePassword?: boolean }).mustChangePassword
-        );
+      // Explicit session.update() call — carries new role / mustChangePassword / isActive values
+      if (trigger === "update" && updateSession && typeof updateSession === "object") {
+        const u = updateSession as {
+          mustChangePassword?: boolean;
+          role?: string;
+          isActive?: boolean;
+        };
+        if ("mustChangePassword" in u) token.mustChangePassword = Boolean(u.mustChangePassword);
+        if ("role" in u && u.role) token.role = u.role as import("@prisma/client").UserRole;
+        if ("isActive" in u) token.isActive = Boolean(u.isActive);
       }
       return token;
     },
@@ -48,6 +50,10 @@ export default {
         session.user.id = token.id as string;
         session.user.role = token.role as import("@prisma/client").UserRole;
         session.user.mustChangePassword = token.mustChangePassword === true;
+        // If the token signals the account was deactivated, expire the session
+        if (token.isActive === false) {
+          return { ...session, expires: new Date(0).toISOString() };
+        }
       }
       return session;
     },

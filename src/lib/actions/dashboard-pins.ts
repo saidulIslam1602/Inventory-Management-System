@@ -29,31 +29,35 @@ export async function setDashboardProductPinned(
   const gate = await requireViewerSession();
   if (!gate.ok) return { success: false, error: gate.error };
 
-  const product = await prisma.product.findFirst({
-    where: { id: productId, isActive: true },
-    select: { id: true },
-  });
-  if (!product) return { success: false, error: "That product could not be found." };
+  try {
+    const product = await prisma.product.findFirst({
+      where: { id: productId, isActive: true },
+      select: { id: true },
+    });
+    if (!product) return { success: false, error: "That product could not be found." };
 
-  const user = await prisma.user.findUnique({
-    where: { id: gate.userId },
-    select: { dashboardPins: true },
-  });
-  const state = parseDashboardPins(user?.dashboardPins);
-  const next = pinned ? addProductPin(state, productId) : removeProductPin(state, productId);
+    const user = await prisma.user.findUnique({
+      where: { id: gate.userId },
+      select: { dashboardPins: true },
+    });
+    const state = parseDashboardPins(user?.dashboardPins);
+    const next = pinned ? addProductPin(state, productId) : removeProductPin(state, productId);
 
-  await prisma.user.update({
-    where: { id: gate.userId },
-    data: { dashboardPins: next as object },
-  });
+    await prisma.user.update({
+      where: { id: gate.userId },
+      data: { dashboardPins: next as object },
+    });
 
-  revalidatePath("/dashboard");
-  revalidatePath("/inventory");
-  return {
-    success: true,
-    data: undefined,
-    message: pinned ? "Added to your watchlist." : "Removed from watchlist.",
-  };
+    revalidatePath("/dashboard");
+    revalidatePath("/inventory");
+    return {
+      success: true,
+      data: undefined,
+      message: pinned ? "Added to your watchlist." : "Removed from watchlist.",
+    };
+  } catch {
+    return { success: false, error: "Could not update watchlist. Please try again." };
+  }
 }
 
 export async function setDashboardProjectPinned(
@@ -63,29 +67,33 @@ export async function setDashboardProjectPinned(
   const gate = await requireViewerSession();
   if (!gate.ok) return { success: false, error: gate.error };
 
-  const project = await prisma.project.findFirst({
-    where: { id: projectId },
-    select: { id: true },
-  });
-  if (!project) return { success: false, error: "That project could not be found." };
+  try {
+    const project = await prisma.project.findFirst({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) return { success: false, error: "That project could not be found." };
 
-  const user = await prisma.user.findUnique({
-    where: { id: gate.userId },
-    select: { dashboardPins: true },
-  });
-  const state = parseDashboardPins(user?.dashboardPins);
-  const next = pinned ? addProjectPin(state, projectId) : removeProjectPin(state, projectId);
+    const user = await prisma.user.findUnique({
+      where: { id: gate.userId },
+      select: { dashboardPins: true },
+    });
+    const state = parseDashboardPins(user?.dashboardPins);
+    const next = pinned ? addProjectPin(state, projectId) : removeProjectPin(state, projectId);
 
-  await prisma.user.update({
-    where: { id: gate.userId },
-    data: { dashboardPins: next as object },
-  });
+    await prisma.user.update({
+      where: { id: gate.userId },
+      data: { dashboardPins: next as object },
+    });
 
-  revalidatePath("/dashboard");
-  revalidatePath("/projects");
-  return {
-    success: true,
-    data: undefined,
-    message: pinned ? "Added to your watchlist." : "Removed from watchlist.",
-  };
+    revalidatePath("/dashboard");
+    revalidatePath("/projects");
+    return {
+      success: true,
+      data: undefined,
+      message: pinned ? "Added to your watchlist." : "Removed from watchlist.",
+    };
+  } catch {
+    return { success: false, error: "Could not update watchlist. Please try again." };
+  }
 }

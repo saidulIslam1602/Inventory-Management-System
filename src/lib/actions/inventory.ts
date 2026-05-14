@@ -16,7 +16,7 @@ import {
   stockMovementSchema,
 } from "@/lib/validations/inventory";
 import { UserMessage } from "@/lib/user-messages";
-import { canRecordStockMovement } from "@/lib/rbac";
+import { canRecordStockMovement, canViewCatalogPricing } from "@/lib/rbac";
 import type { ActionResult } from "@/types";
 import type { Product } from "@prisma/client";
 import { auditDataChange } from "@/lib/audit/record-event";
@@ -219,66 +219,71 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
 
   const movementUnitCost = type === "IN" && unitCost !== undefined ? unitCost : null;
 
+  if (type === "TRANSFER" && !toLocationId) {
+    return { success: false, error: "A transfer must specify a destination location." };
+  }
+
+  // Mutable ref — populated inside the transaction for the audit call outside it.
+  const stockRef = {
+    productSku: "",
+    locationName: "",
+    productId: "",
+    locationId: "",
+  };
+
   try {
-    const stock = await prisma.stock.findUnique({
-      where: { id: stockId },
-      include: {
-        product: { select: { sku: true, name: true } },
-        location: { select: { name: true } },
-      },
-    });
-    if (!stock) return { success: false, error: "That stock record could not be found." };
-
-    const onHand = Number(stock.quantity);
-    const reserved = Number(stock.reserved);
-    const unreserved = Math.max(0, onHand - reserved);
-
-    // Prevent negative stock on OUT movements (respect soft-reservations)
-    if (type === "OUT") {
-      if (onHand < quantity) {
-        return {
-          success: false,
-          error: `Not enough stock on hand (${onHand} available).`,
-        };
-      }
-      if (unreserved < quantity) {
-        return {
-          success: false,
-          error: `Not enough unreserved stock (available: ${unreserved}).`,
-        };
-      }
-    }
-
-    if (type === "TRANSFER") {
-      if (!toLocationId) {
-        return {
-          success: false,
-          error: "A transfer must specify a destination location.",
-        };
-      }
-      if (toLocationId === stock.locationId) {
-        return {
-          success: false,
-          error: "Source and destination locations must be different.",
-        };
-      }
-      if (onHand < quantity) {
-        return {
-          success: false,
-          error: `Not enough stock to transfer (${onHand} on hand).`,
-        };
-      }
-      if (unreserved < quantity) {
-        return {
-          success: false,
-          error: `Cannot transfer reserved quantity (unreserved available: ${unreserved}).`,
-        };
-      }
-    }
-
-    // Run movement + stock update in a transaction
+    // All stock reads, validations, and writes run inside one serialized transaction.
+    // SELECT … FOR UPDATE locks the source row so concurrent OUT/TRANSFER movements
+    // cannot both pass the quantity check (TOCTOU fix).
     await prisma.$transaction(async (tx) => {
-      // Append immutable movement record
+      const rows = await tx.$queryRaw<
+        Array<{
+          id: string;
+          quantity: number;
+          reserved: number;
+          productId: string;
+          locationId: string;
+          productSku: string;
+          locationName: string;
+        }>
+      >`
+        SELECT
+          s.id,
+          s.quantity,
+          s.reserved,
+          s."productId",
+          s."locationId",
+          p.sku  AS "productSku",
+          l.name AS "locationName"
+        FROM stock s
+        JOIN products p ON p.id = s."productId"
+        JOIN locations l ON l.id = s."locationId"
+        WHERE s.id = ${stockId}
+        FOR UPDATE
+      `;
+
+      const stock = rows[0];
+      if (!stock) throw new Error("STOCK_NOT_FOUND");
+
+      const onHand = Number(stock.quantity);
+      const reserved = Number(stock.reserved);
+      const unreserved = Math.max(0, onHand - reserved);
+
+      if (type === "OUT") {
+        if (onHand < quantity) throw new Error(`INSUFFICIENT:${onHand}`);
+        if (unreserved < quantity) throw new Error(`RESERVED:${unreserved}`);
+      }
+      if (type === "TRANSFER") {
+        if (toLocationId === stock.locationId) throw new Error("SAME_LOCATION");
+        if (onHand < quantity) throw new Error(`INSUFFICIENT:${onHand}`);
+        if (unreserved < quantity) throw new Error(`RESERVED:${unreserved}`);
+      }
+
+      stockRef.productSku = stock.productSku;
+      stockRef.locationName = stock.locationName;
+      stockRef.productId = stock.productId;
+      stockRef.locationId = stock.locationId;
+
       await tx.stockMovement.create({
         data: {
           stockId,
@@ -294,16 +299,11 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
         },
       });
 
-      // Update current stock quantity (TRANSFER is handled below; ADJUSTMENT/RESERVED/RELEASED stay audit-only here)
       const delta = type === "OUT" ? -quantity : type === "IN" ? quantity : 0;
       if (delta !== 0) {
-        await tx.stock.update({
-          where: { id: stockId },
-          data: { quantity: { increment: delta } },
-        });
+        await tx.stock.update({ where: { id: stockId }, data: { quantity: { increment: delta } } });
       }
 
-      // TRANSFER: mirrored IN at destination + decrement source (dest row created if missing)
       if (type === "TRANSFER" && toLocationId) {
         let destStock = await tx.stock.findFirst({
           where: { productId: stock.productId, locationId: toLocationId },
@@ -319,7 +319,6 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
             },
           });
         }
-
         await tx.stock.update({
           where: { id: destStock.id },
           data: { quantity: { increment: quantity } },
@@ -348,14 +347,14 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
     await auditDataChange({
       session,
       action: `stock.movement.${type.toLowerCase()}`,
-      summary: `${type} × ${quantity} for ${stock.product.sku} @ ${stock.location.name}${purchaseOrderId ? " (PO-linked)" : ""}${projectId ? " (project-linked)" : ""}.`,
+      summary: `${type} × ${quantity} for ${stockRef.productSku} @ ${stockRef.locationName}${purchaseOrderId ? " (PO-linked)" : ""}${projectId ? " (project-linked)" : ""}.`,
       targetType: "Stock",
       targetId: stockId,
       metadata: {
         movementType: type,
         quantity,
-        productSku: stock.product.sku,
-        locationName: stock.location.name,
+        productSku: stockRef.productSku,
+        locationName: stockRef.locationName,
         purchaseOrderId: purchaseOrderId ?? null,
         projectId: projectId ?? null,
       },
@@ -364,11 +363,21 @@ export async function createStockMovement(formData: unknown): Promise<ActionResu
     revalidatePath("/inventory");
     revalidatePath("/dashboard");
     return { success: true, data: undefined, message: "Stock movement was recorded successfully." };
-  } catch {
-    return {
-      success: false,
-      error: "Stock movement could not be recorded. Please try again.",
-    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg === "STOCK_NOT_FOUND")
+      return { success: false, error: "That stock record could not be found." };
+    if (msg.startsWith("INSUFFICIENT:")) {
+      const avail = msg.split(":")[1];
+      return { success: false, error: `Not enough stock on hand (${avail} available).` };
+    }
+    if (msg.startsWith("RESERVED:")) {
+      const avail = msg.split(":")[1];
+      return { success: false, error: `Not enough unreserved stock (available: ${avail}).` };
+    }
+    if (msg === "SAME_LOCATION")
+      return { success: false, error: "Source and destination locations must be different." };
+    return { success: false, error: "Stock movement could not be recorded. Please try again." };
   }
 }
 
@@ -390,6 +399,8 @@ export async function previewProductByScanCode(code: string): Promise<ProductSca
   const trimmed = code.trim();
   if (!trimmed) return null;
 
+  const showCost = canViewCatalogPricing(session.user.role);
+
   const product = await prisma.product.findFirst({
     where: {
       isActive: true,
@@ -400,7 +411,7 @@ export async function previewProductByScanCode(code: string): Promise<ProductSca
       name: true,
       sku: true,
       barcode: true,
-      purchaseUnitCost: true,
+      purchaseUnitCost: showCost,
       unit: { select: { symbol: true } },
     },
   });
@@ -409,7 +420,8 @@ export async function previewProductByScanCode(code: string): Promise<ProductSca
 
   return {
     ...product,
-    purchaseUnitCost: product.purchaseUnitCost !== null ? Number(product.purchaseUnitCost) : null,
+    purchaseUnitCost:
+      showCost && product.purchaseUnitCost !== null ? Number(product.purchaseUnitCost) : null,
   };
 }
 

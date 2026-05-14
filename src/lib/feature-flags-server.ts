@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/db";
+import { getCachedAppSettings } from "@/lib/app-settings-cache";
 import {
   mergeFeatureFlags,
   type FeatureFlagKey,
@@ -7,10 +7,7 @@ import {
 } from "@/lib/feature-flags";
 
 export async function getResolvedFeatureFlags(): Promise<ResolvedFeatureFlags> {
-  const row = await prisma.appSettings.findUnique({
-    where: { id: "default" },
-    select: { featureFlags: true },
-  });
+  const row = await getCachedAppSettings();
   return mergeFeatureFlags(row?.featureFlags ?? null);
 }
 

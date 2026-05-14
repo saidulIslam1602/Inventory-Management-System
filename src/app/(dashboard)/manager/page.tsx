@@ -13,6 +13,7 @@ import {
   BarChart3,
   Building2,
   ClipboardList,
+  FileText,
   Package,
   Users,
 } from "lucide-react";
@@ -131,6 +132,12 @@ export default async function ManagerHubPage({ searchParams }: PageProps) {
               <Link href="/dashboard">
                 <BarChart3 className="mr-1.5 h-4 w-4" />
                 Dashboard
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/manager/docs" target="_blank" rel="noopener noreferrer">
+                <FileText className="mr-1.5 h-4 w-4" />
+                Document portal
               </Link>
             </Button>
             <Button asChild size="sm">

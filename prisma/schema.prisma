@@ -20,6 +20,7 @@
 //   Notification              — DB-stored alert queue (low-stock, PO events)
 //   PurchaseOrderAuditLog     — Append-only PO status / receipt events (digest + PO detail)
 //   AuditEvent                — Append-only org/security audit (settings, exports, auth, invites, directory CRUD)
+//   ManagedDocument           — Manager Document Portal: contracts, invoices, other files (stored as bytes)
 // ──────────────────────────────────────────────────────────────────────────────
 
 generator client {
@@ -113,6 +114,13 @@ enum AuditEventCategory {
   DATA
 }
 
+/// Category for manager-uploaded documents in the Document Portal.
+enum DocCategory {
+  CONTRACT
+  INVOICE
+  OTHER
+}
+
 // ─────────────────────────────────────────────
 // AUTH (Auth.js v5 / NextAuth required tables)
 // ─────────────────────────────────────────────
@@ -144,6 +152,7 @@ model User {
   notifications  Notification[]
   invitationsSent UserInvitation[] @relation("UserInvitationsSent")
   auditEvents     AuditEvent[]
+  managedDocuments ManagedDocument[]
 
   @@map("users")
 }
@@ -219,6 +228,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([provider, providerAccountId])
+  @@index([userId])
   @@map("accounts")
 }
 
@@ -231,6 +241,7 @@ model Session {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("sessions")
 }
 
@@ -336,6 +347,10 @@ model Product {
   purchaseOrderItems PurchaseOrderItem[]
   projectMaterials  ProjectMaterial[]
 
+  @@index([categoryId])
+  @@index([unitId])
+  @@index([supplierId])
+  @@index([isActive, name])
   @@map("products")
 }
 
@@ -403,6 +418,8 @@ model StockMovement {
   @@index([stockId, createdAt(sort: Desc)])
   /// Weekly IN/OUT counters (`manager-overview`, digest-adjacent counts).
   @@index([type, createdAt(sort: Desc)])
+  @@index([purchaseOrderId])
+  @@index([projectId])
 
   @@map("stock_movements")
 }
@@ -460,6 +477,9 @@ model PurchaseOrder {
   @@index([createdAt(sort: Desc)])
   /// Filtered lists + `groupBy` status tabs.
   @@index([status, createdAt(sort: Desc)])
+  /// Branch-scoped manager hub pipelines.
+  @@index([locationId, status, updatedAt(sort: Desc)])
+  @@index([supplierId])
 
   @@map("purchase_orders")
 }
@@ -497,6 +517,8 @@ model PurchaseOrderItem {
   productId String
   product   Product @relation(fields: [productId], references: [id])
 
+  @@index([purchaseOrderId])
+  @@index([productId])
   @@map("purchase_order_items")
 }
 
@@ -533,6 +555,9 @@ model Employee {
   shifts       Shift[]
   projects     ProjectEmployee[]
 
+  @@index([locationId])
+  @@index([departmentId])
+  @@index([isActive])
   @@map("employees")
 }
 
@@ -625,6 +650,8 @@ model Project {
 
   @@index([createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+  @@index([locationId])
+  @@index([customerId])
 
   @@map("projects")
 }
@@ -684,6 +711,24 @@ model AppSettings {
   updatedAt                     DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+/// Document Portal — manager-uploaded contracts, invoices and other files (stored as raw bytes in DB).
+model ManagedDocument {
+  id           String      @id @default(cuid())
+  name         String
+  category     DocCategory
+  mimeType     String      @db.VarChar(128)
+  sizeBytes    Int
+  /// Raw file bytes stored directly in PostgreSQL.
+  content      Bytes
+  uploadedById String
+  uploadedBy   User        @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([uploadedById, createdAt(sort: Desc)])
+  @@map("managed_documents")
 }
 
 /// DB-stored notification queue (low-stock alerts, PO events, etc.)

@@ -228,6 +228,8 @@ async function getDashboardData(mode: ChartPeriodMode, offset: number) {
 
     prisma.purchaseOrder.findMany({
       where: { status: { in: ["ORDERED", "PARTIALLY_RECEIVED"] } },
+      take: 100,
+      orderBy: { updatedAt: "asc" },
       select: { updatedAt: true },
     }),
   ]);

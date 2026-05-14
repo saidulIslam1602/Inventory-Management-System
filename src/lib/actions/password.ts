@@ -17,6 +17,7 @@ import {
 import {
   checkForgotPasswordRateLimit,
   checkResetPasswordOtpRateLimit,
+  checkChangePasswordRateLimit,
   rateLimitedActionMessage,
 } from "@/lib/auth-rate-limit";
 import { UserMessage } from "@/lib/user-messages";
@@ -205,6 +206,10 @@ export async function changePassword(formData: unknown): Promise<ActionResult> {
   if (!session?.user?.id) {
     return { success: false, error: UserMessage.auth.signInRequired };
   }
+
+  const hdrs = await headers();
+  const rl = await checkChangePasswordRateLimit(hdrs);
+  if (rl) return { success: false, error: rateLimitedActionMessage(rl) };
 
   const userRow = await prisma.user.findUnique({
     where: { id: session.user.id },

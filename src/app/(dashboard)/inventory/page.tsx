@@ -21,9 +21,10 @@ export const metadata: Metadata = { title: "Inventory" };
 
 async function getInventoryData() {
   const [products, locations, stockSummary, categories, suppliers] = await Promise.all([
-    // All products with their stock across all locations
+    // All products with their stock across all locations (capped to prevent full-table loads)
     prisma.product.findMany({
       where: { isActive: true },
+      take: 500,
       include: {
         category: true,
         unit: true,

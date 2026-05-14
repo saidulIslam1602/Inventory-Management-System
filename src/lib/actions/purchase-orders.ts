@@ -24,14 +24,24 @@ import {
 } from "@/lib/manager/notify-by-preference";
 import { auditDataChange } from "@/lib/audit/record-event";
 
-// ── Generate PO number ────────────────────────────────────────────────────────
+// ── Generate PO number (atomic) ───────────────────────────────────────────────
+//
+// Uses a PostgreSQL session-level advisory lock keyed on the year so that
+// concurrent createPurchaseOrder calls cannot receive the same sequence number.
+// The lock is released automatically when the DB connection is returned to the pool.
 
-async function generatePONumber(): Promise<string> {
+async function generatePONumberAtomic(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
+): Promise<string> {
   const year = new Date().getFullYear();
-  const count = await prisma.purchaseOrder.count({
-    where: { poNumber: { startsWith: `PO-${year}-` } },
-  });
-  return `PO-${year}-${String(count + 1).padStart(4, "0")}`;
+  // Lock key is stable per year: 20260000 for 2026, etc.
+  const lockKey = year * 10_000;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+  const rows = await tx.$queryRaw<[{ c: bigint }]>`
+    SELECT COUNT(*) AS c FROM purchase_orders WHERE po_number LIKE ${"PO-" + year + "-%"}
+  `;
+  const seq = Number(rows[0]?.c ?? 0) + 1;
+  return `PO-${year}-${String(seq).padStart(4, "0")}`;
 }
 
 // ── Create PO ─────────────────────────────────────────────────────────────────
@@ -55,29 +65,32 @@ export async function createPurchaseOrder(
   try {
     const { supplierId, locationId, expectedDate, notes, items } = parsed.data;
 
-    // Calculate total from line items (2 dp NOK to avoid binary float dust)
     const totalAmount =
       Math.round(
         items.reduce((sum, item) => sum + item.orderedQuantity * item.unitPrice, 0) * 100
       ) / 100;
 
-    const po = await prisma.purchaseOrder.create({
-      data: {
-        poNumber: await generatePONumber(),
-        supplierId,
-        locationId,
-        expectedDate: expectedDate ?? null,
-        notes: notes ?? null,
-        totalAmount,
-        createdById: session.user.id,
-        items: {
-          create: items.map((item) => ({
-            productId: item.productId,
-            orderedQuantity: item.orderedQuantity,
-            unitPrice: item.unitPrice,
-          })),
+    // Generate PO number and create the record atomically to prevent duplicate sequence numbers
+    const po = await prisma.$transaction(async (tx) => {
+      const poNumber = await generatePONumberAtomic(tx);
+      return tx.purchaseOrder.create({
+        data: {
+          poNumber,
+          supplierId,
+          locationId,
+          expectedDate: expectedDate ?? null,
+          notes: notes ?? null,
+          totalAmount,
+          createdById: session.user.id,
+          items: {
+            create: items.map((item) => ({
+              productId: item.productId,
+              orderedQuantity: item.orderedQuantity,
+              unitPrice: item.unitPrice,
+            })),
+          },
         },
-      },
+      });
     });
 
     await auditDataChange({

@@ -22,54 +22,58 @@ export async function updateMyNotificationPreferences(prefs: unknown): Promise<A
 
   const prefsIn = parsed.data;
 
-  const existing = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { notificationPreferences: true },
-  });
-  const raw = existing?.notificationPreferences;
-  const base =
-    raw && typeof raw === "object" && !Array.isArray(raw)
-      ? { ...(raw as Record<string, unknown>) }
-      : {};
+  try {
+    const existing = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { notificationPreferences: true },
+    });
+    const raw = existing?.notificationPreferences;
+    const base =
+      raw && typeof raw === "object" && !Array.isArray(raw)
+        ? { ...(raw as Record<string, unknown>) }
+        : {};
 
-  const instant = prefsIn.instant ?? {};
-  const normalized = {
-    ...base,
-    instant: {
-      poSubmitted: instant.poSubmitted !== false,
-      poApproved: instant.poApproved !== false,
-      poOrdered: instant.poOrdered !== false,
-      poReceived: instant.poReceived !== false,
-      poApprovalEscalation: instant.poApprovalEscalation !== false,
-    },
-    digestDaily: prefsIn.digestDaily === true,
-    emailDigestDaily: prefsIn.emailDigestDaily === true,
-    emailApprovalEscalation: prefsIn.emailApprovalEscalation === true,
-  };
+    const instant = prefsIn.instant ?? {};
+    const normalized = {
+      ...base,
+      instant: {
+        poSubmitted: instant.poSubmitted !== false,
+        poApproved: instant.poApproved !== false,
+        poOrdered: instant.poOrdered !== false,
+        poReceived: instant.poReceived !== false,
+        poApprovalEscalation: instant.poApprovalEscalation !== false,
+      },
+      digestDaily: prefsIn.digestDaily === true,
+      emailDigestDaily: prefsIn.emailDigestDaily === true,
+      emailApprovalEscalation: prefsIn.emailApprovalEscalation === true,
+    };
 
-  await prisma.user.update({
-    where: { id: session.user.id },
-    data: { notificationPreferences: normalized as object },
-  });
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { notificationPreferences: normalized as object },
+    });
 
-  await auditDataChange({
-    session,
-    action: "user.notification_preferences.update",
-    summary: "Updated notification delivery preferences.",
-    targetType: "User",
-    targetId: session.user.id,
-    metadata: {
-      digestDaily: normalized.digestDaily,
-      emailDigestDaily: normalized.emailDigestDaily,
-      emailApprovalEscalation: normalized.emailApprovalEscalation,
-      instant: normalized.instant,
-    },
-  });
+    await auditDataChange({
+      session,
+      action: "user.notification_preferences.update",
+      summary: "Updated notification delivery preferences.",
+      targetType: "User",
+      targetId: session.user.id,
+      metadata: {
+        digestDaily: normalized.digestDaily,
+        emailDigestDaily: normalized.emailDigestDaily,
+        emailApprovalEscalation: normalized.emailApprovalEscalation,
+        instant: normalized.instant,
+      },
+    });
 
-  revalidatePath("/me");
-  return {
-    success: true,
-    data: undefined,
-    message: "Your notification preferences were saved successfully.",
-  };
+    revalidatePath("/me");
+    return {
+      success: true,
+      data: undefined,
+      message: "Your notification preferences were saved successfully.",
+    };
+  } catch {
+    return { success: false, error: "Could not save preferences. Please try again." };
+  }
 }

@@ -1,17 +1,9 @@
-import { prisma } from "@/lib/db";
+import { getCachedAppSettings } from "@/lib/app-settings-cache";
 import { isMaintenanceBannerVisibleAt } from "@/lib/maintenance-banner";
 
 /** Non-null trimmed message when the maintenance banner should show for `now`. */
 export async function getActiveMaintenanceBannerMessage(now = new Date()): Promise<string | null> {
-  const row = await prisma.appSettings.findUnique({
-    where: { id: "default" },
-    select: {
-      maintenanceBannerEnabled: true,
-      maintenanceBannerMessage: true,
-      maintenanceBannerStartsAt: true,
-      maintenanceBannerEndsAt: true,
-    },
-  });
+  const row = await getCachedAppSettings();
   if (!row) return null;
   const config = {
     enabled: row.maintenanceBannerEnabled,

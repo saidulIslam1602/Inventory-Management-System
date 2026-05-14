@@ -9,6 +9,7 @@ const STORE_FORGOT = "auth:forgot_password";
 const STORE_RESET_OTP = "auth:reset_password_otp";
 const STORE_INVITE_ACCEPT = "auth:invite_accept";
 const STORE_INVITE_CREATE = "auth:invite_create";
+const STORE_CHANGE_PASSWORD = "auth:change_password";
 
 /** Credential POST — brute-force protection */
 const CREDENTIALS_LIMIT = 15;
@@ -29,6 +30,9 @@ const INVITE_ACCEPT_WINDOW_MS = 15 * 60 * 1000;
 
 const INVITE_CREATE_LIMIT = 40;
 const INVITE_CREATE_WINDOW_MS = 60 * 60 * 1000;
+
+const CHANGE_PASSWORD_LIMIT = 10;
+const CHANGE_PASSWORD_WINDOW_MS = 15 * 60 * 1000;
 
 export type RateLimitBlock = { retryAfterSeconds: number };
 
@@ -117,6 +121,18 @@ export async function checkInviteCreateRateLimit(h: Headers): Promise<RateLimitB
     key: ip,
     limit: INVITE_CREATE_LIMIT,
     windowMs: INVITE_CREATE_WINDOW_MS,
+  });
+  return toBlock(r);
+}
+
+/** Signed-in password change — prevents account-scoped brute force via the settings page. */
+export async function checkChangePasswordRateLimit(h: Headers): Promise<RateLimitBlock | null> {
+  const ip = getClientIpFromHeaders(h);
+  const r = await consumeAuthRateLimit({
+    store: STORE_CHANGE_PASSWORD,
+    key: ip,
+    limit: CHANGE_PASSWORD_LIMIT,
+    windowMs: CHANGE_PASSWORD_WINDOW_MS,
   });
   return toBlock(r);
 }
