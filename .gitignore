@@ -23,6 +23,14 @@ build/
 # ── Testing ───────────────────────────────────────────────────────────────────
 coverage/
 .nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# ── TypeScript incremental caches — reproducible from compile (never commit) ──
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+prisma/tsconfig.tsbuildinfo
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 *.log
@@ -40,3 +48,6 @@ Thumbs.db
 *.swo
 
 /src/generated/prisma
+
+# ── Local DB dumps (scripts/pg-backup.sh default output) ───────────────────────
+/backups/

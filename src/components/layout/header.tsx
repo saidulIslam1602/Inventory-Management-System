@@ -5,10 +5,11 @@
  * Sits above all dashboard pages.
  */
 
-import { usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { logout } from "@/lib/actions/auth";
 import { clearAuthPageCaches } from "@/lib/pwa-cache";
-import { LogOut, ChevronRight } from "lucide-react";
+import { LogOut, ChevronRight, MoreVertical } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -20,12 +21,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Suspense } from "react";
 import { GlobalSearchCommand } from "@/components/layout/global-search-command";
+import { StaffCmdPaletteRouteRecorder } from "@/components/layout/staff-cmd-palette-route-recorder";
 import { HeaderNotificationsMenu } from "@/components/layout/header-notifications-menu";
 
 // Map route paths to human-readable breadcrumb labels
 const PATH_LABELS: Record<string, string> = {
   me: "My portal",
+  profile: "Profile",
   dashboard: "Dashboard",
   manager: "Manager hub",
   inventory: "Inventory",
@@ -38,6 +42,7 @@ const PATH_LABELS: Record<string, string> = {
 
 interface HeaderProps {
   user: {
+    id: string;
     name?: string | null;
     email?: string | null;
     role: string;
@@ -47,6 +52,7 @@ interface HeaderProps {
 
 export function Header({ user, notificationCount = 0 }: HeaderProps) {
   const pathname = usePathname();
+  const router = useRouter();
 
   // Build breadcrumb segments from the URL path
   const segments = pathname.split("/").filter(Boolean);
@@ -89,43 +95,75 @@ export function Header({ user, notificationCount = 0 }: HeaderProps) {
       </nav>
 
       {/* Quick search */}
-      <GlobalSearchCommand />
+      {user.role === "STAFF" && user.id ? (
+        <Suspense fallback={null}>
+          <StaffCmdPaletteRouteRecorder userId={user.id} />
+        </Suspense>
+      ) : null}
+      <GlobalSearchCommand staffPaletteUserId={user.role === "STAFF" ? user.id : null} />
 
       {/* Right actions */}
       <div className="flex items-center gap-2">
         {/* Notifications bell */}
         <HeaderNotificationsMenu unreadCount={notificationCount} />
 
-        {/* User menu — server action logout (Auth.js v5); simple trigger avoids focus/ref issues with nested Avatar */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
+        {/* Profile: direct link on initials; overflow menu for password + logout */}
+        <div className="flex items-center gap-0.5">
+          <Link
+            href="/profile"
             className="bg-primary text-primary-foreground focus-visible:ring-ring inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold outline-none transition-opacity hover:opacity-90 focus-visible:ring-2"
-            aria-label="User menu"
+            aria-label="My profile"
+            title="My profile"
           >
             {initials}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" sideOffset={6} className="w-52">
-            <DropdownMenuLabel>
-              <div className="text-sm font-medium">{user.name ?? "User"}</div>
-              <div className="text-muted-foreground text-xs font-normal">{user.email}</div>
-              <Badge variant="secondary" className="mt-1 text-[10px] capitalize">
-                {user.role.toLowerCase()}
-              </Badge>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              className="cursor-pointer"
-              onClick={() => {
-                clearAuthPageCaches();
-                void logout();
-              }}
+          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring inline-flex h-8 w-8 items-center justify-center rounded-md outline-none focus-visible:ring-2"
+              aria-label="Account menu"
             >
-              <LogOut className="mr-2 h-4 w-4" />
-              Log out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <MoreVertical className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={6} className="w-52">
+              <DropdownMenuLabel>
+                <div className="text-sm font-medium">{user.name ?? "User"}</div>
+                <div className="text-muted-foreground text-xs font-normal">{user.email}</div>
+                <Badge variant="secondary" className="mt-1 text-[10px] capitalize">
+                  {user.role.toLowerCase()}
+                </Badge>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  router.push("/profile");
+                }}
+              >
+                My profile
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => {
+                  router.push("/change-password");
+                }}
+              >
+                Change password
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                className="cursor-pointer"
+                onClick={() => {
+                  clearAuthPageCaches();
+                  void logout();
+                }}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </header>
   );

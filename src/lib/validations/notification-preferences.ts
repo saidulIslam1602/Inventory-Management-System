@@ -6,6 +6,7 @@ const instantPoSchema = z
     poApproved: z.boolean().optional(),
     poOrdered: z.boolean().optional(),
     poReceived: z.boolean().optional(),
+    poApprovalEscalation: z.boolean().optional(),
   })
   .strict();
 
@@ -18,6 +19,7 @@ export const notificationPreferencesInputSchema = z
     instant: instantPoSchema.optional(),
     digestDaily: z.boolean().optional(),
     emailDigestDaily: z.boolean().optional(),
+    emailApprovalEscalation: z.boolean().optional(),
   })
   .strict();
 

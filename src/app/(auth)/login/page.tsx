@@ -4,6 +4,7 @@
 
 import { Suspense } from "react";
 import { LoginForm } from "./login-form";
+import { publicAuthOrigin } from "@/lib/auth-cookie-policy";
 
 function LoginFallback() {
   return (
@@ -14,9 +15,15 @@ function LoginFallback() {
 }
 
 export default function LoginPage() {
+  const expectedAuthOrigin = publicAuthOrigin();
+  const showOriginMismatchHint = process.env.NODE_ENV === "development";
+
   return (
     <Suspense fallback={<LoginFallback />}>
-      <LoginForm />
+      <LoginForm
+        expectedAuthOrigin={expectedAuthOrigin}
+        showOriginMismatchHint={showOriginMismatchHint}
+      />
     </Suspense>
   );
 }

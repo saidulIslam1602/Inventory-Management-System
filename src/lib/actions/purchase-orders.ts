@@ -11,22 +11,37 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { NotificationType, type POStatus } from "@prisma/client";
-import { purchaseOrderSchema, receiveItemsSchema } from "@/lib/validations/purchase-order";
+import {
+  purchaseOrderSchema,
+  receiveItemsSchema,
+  escalationNoteSchema,
+} from "@/lib/validations/purchase-order";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
 import {
   getOpsLeaderUserIds,
   notifyUsersForInstantPoPreference,
 } from "@/lib/manager/notify-by-preference";
+import { auditDataChange } from "@/lib/audit/record-event";
 
-// ── Generate PO number ────────────────────────────────────────────────────────
+// ── Generate PO number (atomic) ───────────────────────────────────────────────
+//
+// Uses a PostgreSQL session-level advisory lock keyed on the year so that
+// concurrent createPurchaseOrder calls cannot receive the same sequence number.
+// The lock is released automatically when the DB connection is returned to the pool.
 
-async function generatePONumber(): Promise<string> {
+async function generatePONumberAtomic(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
+): Promise<string> {
   const year = new Date().getFullYear();
-  const count = await prisma.purchaseOrder.count({
-    where: { poNumber: { startsWith: `PO-${year}-` } },
-  });
-  return `PO-${year}-${String(count + 1).padStart(4, "0")}`;
+  // Lock key is stable per year: 20260000 for 2026, etc.
+  const lockKey = year * 10_000;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`;
+  const rows = await tx.$queryRaw<[{ c: bigint }]>`
+    SELECT COUNT(*) AS c FROM purchase_orders WHERE po_number LIKE ${"PO-" + year + "-%"}
+  `;
+  const seq = Number(rows[0]?.c ?? 0) + 1;
+  return `PO-${year}-${String(seq).padStart(4, "0")}`;
 }
 
 // ── Create PO ─────────────────────────────────────────────────────────────────
@@ -50,29 +65,41 @@ export async function createPurchaseOrder(
   try {
     const { supplierId, locationId, expectedDate, notes, items } = parsed.data;
 
-    // Calculate total from line items (2 dp NOK to avoid binary float dust)
     const totalAmount =
       Math.round(
         items.reduce((sum, item) => sum + item.orderedQuantity * item.unitPrice, 0) * 100
       ) / 100;
 
-    const po = await prisma.purchaseOrder.create({
-      data: {
-        poNumber: await generatePONumber(),
-        supplierId,
-        locationId,
-        expectedDate: expectedDate ?? null,
-        notes: notes ?? null,
-        totalAmount,
-        createdById: session.user.id,
-        items: {
-          create: items.map((item) => ({
-            productId: item.productId,
-            orderedQuantity: item.orderedQuantity,
-            unitPrice: item.unitPrice,
-          })),
+    // Generate PO number and create the record atomically to prevent duplicate sequence numbers
+    const po = await prisma.$transaction(async (tx) => {
+      const poNumber = await generatePONumberAtomic(tx);
+      return tx.purchaseOrder.create({
+        data: {
+          poNumber,
+          supplierId,
+          locationId,
+          expectedDate: expectedDate ?? null,
+          notes: notes ?? null,
+          totalAmount,
+          createdById: session.user.id,
+          items: {
+            create: items.map((item) => ({
+              productId: item.productId,
+              orderedQuantity: item.orderedQuantity,
+              unitPrice: item.unitPrice,
+            })),
+          },
         },
-      },
+      });
+    });
+
+    await auditDataChange({
+      session,
+      action: "po.create",
+      summary: `Created purchase order ${po.poNumber} (${items.length} line(s), total ${totalAmount}).`,
+      targetType: "PurchaseOrder",
+      targetId: po.id,
+      metadata: { poNumber: po.poNumber, lineCount: items.length, totalAmount },
     });
 
     revalidatePath("/purchase-orders");
@@ -179,6 +206,15 @@ export async function advancePOStatus(
         candidateUserIds: [...leaderIds, po.createdById],
       });
     }
+
+    await auditDataChange({
+      session,
+      action: `po.workflow.${action}`,
+      summary: `${po.poNumber}: ${fromStatus} → ${toStatus} (${action}).`,
+      targetType: "PurchaseOrder",
+      targetId: poId,
+      metadata: { poNumber: po.poNumber, fromStatus, toStatus, workflowStep: action },
+    });
 
     revalidatePath("/purchase-orders");
     revalidatePath(`/purchase-orders/${poId}`);
@@ -329,6 +365,9 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
       });
     });
 
+    const receiptLines = items.filter((i) => i.receivedQuantity > 0);
+    const qtySum = receiptLines.reduce((s, i) => s + i.receivedQuantity, 0);
+
     const updatedPo = await prisma.purchaseOrder.findUnique({
       where: { id: purchaseOrderId },
       select: { poNumber: true, status: true, createdById: true },
@@ -348,6 +387,20 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
       });
     }
 
+    await auditDataChange({
+      session,
+      action: "po.receive",
+      summary: `Received ${qtySum} units on ${po.poNumber} (${receiptLines.length} line(s)); PO status → ${updatedPo?.status ?? po.status}.`,
+      targetType: "PurchaseOrder",
+      targetId: purchaseOrderId,
+      metadata: {
+        poNumber: po.poNumber,
+        lineCount: receiptLines.length,
+        qtySum,
+        statusAfter: updatedPo?.status ?? po.status,
+      },
+    });
+
     revalidatePath("/purchase-orders");
     revalidatePath("/inventory");
     revalidatePath("/dashboard");
@@ -362,6 +415,63 @@ export async function receiveItems(formData: unknown): Promise<ActionResult> {
     return {
       success: false,
       error: "Receiving could not be completed. Please try again.",
+    };
+  }
+}
+
+// ── Manager escalation note (append-only audit; ADMIN / MANAGER) ──────────────
+
+export async function addPurchaseOrderEscalationNote(formData: unknown): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user || !["ADMIN", "MANAGER"].includes(session.user.role)) {
+    return { success: false, error: UserMessage.permission.denied };
+  }
+
+  const parsed = escalationNoteSchema.safeParse(formData);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? UserMessage.validation.invalidInput,
+    };
+  }
+
+  const { purchaseOrderId, note } = parsed.data;
+
+  try {
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: purchaseOrderId },
+      select: { id: true },
+    });
+    if (!po) {
+      return { success: false, error: "That purchase order could not be found." };
+    }
+
+    await prisma.purchaseOrderAuditLog.create({
+      data: {
+        purchaseOrderId,
+        actorUserId: session.user.id,
+        kind: "ESCALATION_NOTE",
+        details: note,
+      },
+    });
+
+    await auditDataChange({
+      session,
+      action: "po.escalation_note.add",
+      summary: "Added escalation note on purchase order.",
+      targetType: "PurchaseOrder",
+      targetId: purchaseOrderId,
+      metadata: { noteLength: note.length },
+    });
+
+    revalidatePath("/purchase-orders");
+    revalidatePath(`/purchase-orders/${purchaseOrderId}`);
+    revalidatePath("/manager");
+    return { success: true, data: undefined, message: "Note recorded on the PO activity log." };
+  } catch {
+    return {
+      success: false,
+      error: "The note could not be saved. Please try again.",
     };
   }
 }

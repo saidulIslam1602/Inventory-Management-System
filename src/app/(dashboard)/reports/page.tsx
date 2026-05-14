@@ -7,6 +7,7 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { canAccessReportsAnalytics } from "@/lib/rbac";
 import { PageHeader } from "@/components/shared/page-header";
 import { ReportsCharts } from "@/components/reports/reports-charts";
 import { prismaDateForOsloCalendarDay } from "@/lib/business-calendar";
@@ -144,8 +145,8 @@ type PageProps = {
 
 export default async function ReportsPage({ searchParams }: PageProps) {
   const session = await auth();
-  if (session?.user?.role === "STAFF") {
-    redirect("/me");
+  if (!canAccessReportsAnalytics(session?.user?.role)) {
+    redirect(session?.user?.role === "STAFF" ? "/me" : "/dashboard");
   }
 
   const sp = await searchParams;

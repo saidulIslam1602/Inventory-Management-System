@@ -4,7 +4,7 @@
  * Persist named filter presets in localStorage (current URL query string).
  */
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +13,13 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 
 type Preset = { name: string; query: string };
 
-function storageKey(id: string): string {
-  return `aqila-ims:view:${id}`;
+/** When `scopeKey` is set (e.g. authenticated user id), presets do not collide on shared workstations. */
+function presetBucket(storageId: string, scopeKey?: string): string {
+  return scopeKey ? `${storageId}__scope__${scopeKey}` : storageId;
+}
+
+function localStorageKey(bucket: string): string {
+  return `aqila-ims:view:${bucket}`;
 }
 
 /** Dropped when saving / applying presets so pagination does not stick in the bookmark. */
@@ -24,10 +29,10 @@ function normalizePresetQuery(q: string): string {
   return p.toString();
 }
 
-function loadPresets(id: string): Preset[] {
+function loadPresets(bucket: string): Preset[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(storageKey(id));
+    const raw = localStorage.getItem(localStorageKey(bucket));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -43,17 +48,36 @@ function loadPresets(id: string): Preset[] {
   }
 }
 
-function persistPresets(id: string, presets: Preset[]) {
+function persistPresets(bucket: string, presets: Preset[]) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(storageKey(id), JSON.stringify(presets));
+  localStorage.setItem(localStorageKey(bucket), JSON.stringify(presets));
 }
 
-export function SavedViewsBar({ storageId }: { storageId: string }) {
+const DEFAULT_HINT_PRESETS = (
+  <>
+    Stored presets capture the filters in the address bar on this page. Pagination (
+    <span className="font-mono">page</span>) is stripped when saving or loading so you start on page
+    1.
+  </>
+);
+
+export function SavedViewsBar({
+  storageId,
+  scopeKey,
+  hint,
+}: {
+  storageId: string;
+  /** Isolate presets per login (recommended for STAFF on shared PCs). */
+  scopeKey?: string;
+  hint?: ReactNode;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const rawQuery = searchParams.toString();
   const query = normalizePresetQuery(rawQuery);
+
+  const bucket = useMemo(() => presetBucket(storageId, scopeKey), [storageId, scopeKey]);
 
   const [presets, setPresets] = useState<Preset[]>([]);
   const [name, setName] = useState("");
@@ -61,9 +85,9 @@ export function SavedViewsBar({ storageId }: { storageId: string }) {
 
   useEffect(() => {
     startTransition(() => {
-      setPresets(loadPresets(storageId));
+      setPresets(loadPresets(bucket));
     });
-  }, [storageId]);
+  }, [bucket]);
 
   const applyQuery = (q: string) => {
     const nq = normalizePresetQuery(q);
@@ -74,7 +98,7 @@ export function SavedViewsBar({ storageId }: { storageId: string }) {
     const n = name.trim();
     if (!n) return;
     const next = [...presets.filter((p) => p.name !== n), { name: n, query }];
-    persistPresets(storageId, next);
+    persistPresets(bucket, next);
     setPresets(next);
     setName("");
     setSelected("");
@@ -83,7 +107,7 @@ export function SavedViewsBar({ storageId }: { storageId: string }) {
   const onDelete = () => {
     if (!selected) return;
     const next = presets.filter((p) => p.name !== selected);
-    persistPresets(storageId, next);
+    persistPresets(bucket, next);
     setPresets(next);
     setSelected("");
   };
@@ -92,7 +116,15 @@ export function SavedViewsBar({ storageId }: { storageId: string }) {
     <div className="space-y-1.5">
       <div className="border-border bg-muted/10 flex flex-wrap items-end gap-3 rounded-lg border border-dashed px-3 py-2">
         <div className="flex min-w-[200px] flex-wrap items-center gap-2">
-          <Label className="text-muted-foreground whitespace-nowrap text-xs">Saved views</Label>
+          <Label className="text-muted-foreground whitespace-nowrap text-xs">
+            Saved views
+            {scopeKey ? (
+              <span className="text-muted-foreground/85 ml-1 font-normal lowercase">
+                {" "}
+                · Your login
+              </span>
+            ) : null}
+          </Label>
           <NativeSelect
             className="w-full max-w-[220px]"
             size="sm"
@@ -131,10 +163,7 @@ export function SavedViewsBar({ storageId }: { storageId: string }) {
         </div>
       </div>
       <p className="text-muted-foreground text-[11px] leading-snug">
-        Stored presets include movement filters such as type, location,{" "}
-        <span className="font-mono">product</span>, text search, and dates. Pagination (
-        <span className="font-mono">page</span>) is stripped when saving or loading so you start on
-        page 1.
+        {hint ?? DEFAULT_HINT_PRESETS}
       </p>
     </div>
   );

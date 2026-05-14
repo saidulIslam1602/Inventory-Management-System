@@ -5,7 +5,7 @@
  * Parent server page wraps this in Suspense for useSearchParams.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -15,9 +15,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, AlertCircle, Zap } from "lucide-react";
+import Link from "next/link";
+import { Loader2, AlertCircle, Zap, Info } from "lucide-react";
 
-export function LoginForm() {
+type LoginFormProps = {
+  /** From NEXTAUTH_URL / AUTH_URL — session cookies must match this browser origin. */
+  expectedAuthOrigin?: string;
+  /** Only in development — show mismatch banner (localhost vs 127.0.0.1, wrong port). */
+  showOriginMismatchHint?: boolean;
+};
+
+export function LoginForm({ expectedAuthOrigin, showOriginMismatchHint = false }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
@@ -25,10 +33,23 @@ export function LoginForm() {
   const urlErrorMessage =
     urlAuthError === "Configuration"
       ? "The server blocked sign-in because the request host was not trusted. This is now configured—refresh the page and try again."
-      : urlAuthError
-        ? `Sign-in failed (${urlAuthError}). Try again or contact support.`
-        : null;
+      : urlAuthError === "RateLimited"
+        ? "Too many sign-in attempts from this network. Wait a few minutes and try again."
+        : urlAuthError
+          ? `Sign-in failed (${urlAuthError}). Try again or contact support.`
+          : null;
   const [error, setError] = useState<string | null>(null);
+  const [originMismatch, setOriginMismatch] = useState(false);
+  const [browserOrigin, setBrowserOrigin] = useState("");
+
+  useEffect(() => {
+    if (!showOriginMismatchHint || !expectedAuthOrigin) return;
+    queueMicrotask(() => {
+      const o = window.location.origin;
+      setBrowserOrigin(o);
+      setOriginMismatch(o !== expectedAuthOrigin);
+    });
+  }, [showOriginMismatchHint, expectedAuthOrigin]);
 
   const {
     register,
@@ -38,26 +59,42 @@ export function LoginForm() {
 
   async function onSubmit(data: LoginInput) {
     setError(null);
-    const result = await signIn("credentials", {
-      email: data.email,
-      password: data.password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email: data.email,
+        password: data.password,
+        redirect: false,
+      });
 
-    if (result?.error) {
-      setError("Invalid email or password. Please try again.");
-      return;
+      if (result?.error) {
+        setError(
+          result.error === "RateLimited"
+            ? "Too many sign-in attempts from this network. Wait a few minutes and try again."
+            : "Invalid email or password. Please try again."
+        );
+        return;
+      }
+      const session = await getSession();
+      if (session?.user?.mustChangePassword) {
+        router.push("/change-password");
+        return;
+      }
+      const role = session?.user?.role;
+      const next =
+        callbackUrl && callbackUrl !== "/dashboard"
+          ? callbackUrl
+          : role === "STAFF"
+            ? "/me"
+            : "/dashboard";
+      router.push(next);
+    } catch (e) {
+      console.error("signIn failed:", e);
+      setError(
+        e instanceof Error
+          ? `Sign-in request failed: ${e.message}. Is the dev server running and PostgreSQL reachable?`
+          : "Sign-in request failed. Check the dev server console and database connection."
+      );
     }
-    const session = await getSession();
-    const role = session?.user?.role;
-    const next =
-      callbackUrl && callbackUrl !== "/dashboard"
-        ? callbackUrl
-        : role === "STAFF"
-          ? "/me"
-          : "/dashboard";
-    router.push(next);
-    router.refresh();
   }
 
   return (
@@ -123,6 +160,25 @@ export function LoginForm() {
               </Alert>
             )}
 
+            {originMismatch && expectedAuthOrigin && (
+              <Alert className="mb-6 border-amber-500/50 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+                <Info className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <AlertDescription>
+                  You opened <span className="font-mono">{browserOrigin}</span>, but Auth.js is
+                  configured for <span className="font-mono">{expectedAuthOrigin}</span>. Cookies
+                  won&apos;t match across different hosts (e.g.{" "}
+                  <span className="font-mono">localhost</span> vs{" "}
+                  <span className="font-mono">127.0.0.1</span>) or ports — sign-in may fail or not
+                  stick. Open{" "}
+                  <a href={`${expectedAuthOrigin}/login`} className="font-medium underline">
+                    {expectedAuthOrigin}/login
+                  </a>{" "}
+                  in this browser instead (or change <span className="font-mono">NEXTAUTH_URL</span>{" "}
+                  in <span className="font-mono">.env</span> to match how you browse).
+                </AlertDescription>
+              </Alert>
+            )}
+
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="email">Email address</Label>
@@ -162,6 +218,12 @@ export function LoginForm() {
                   "Sign in"
                 )}
               </Button>
+
+              <p className="text-center text-sm">
+                <Link href="/forgot-password" className="text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </p>
             </form>
           </div>
 

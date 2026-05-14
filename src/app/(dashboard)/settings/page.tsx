@@ -1,5 +1,5 @@
 /**
- * Settings page — manage locations, categories, units, users, and system config.
+ * Settings — org reference data; exception thresholds editable by Admin only.
  */
 
 import type { Metadata } from "next";
@@ -12,18 +12,37 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin, Tag, Ruler, Users, Bell } from "lucide-react";
 import { getAppSettings } from "@/lib/app-settings";
 import { ExceptionThresholdsForm } from "@/components/settings/exception-thresholds-form";
+import {
+  UserInvitationsAdmin,
+  type PendingInvitationRow,
+} from "@/components/settings/user-invitations-admin";
+import { FeatureFlagsForm } from "@/components/settings/feature-flags-form";
+import { MaintenanceBannerForm } from "@/components/settings/maintenance-banner-form";
+import { canAccessSettingsPage } from "@/lib/rbac";
+import { getResolvedFeatureFlags } from "@/lib/feature-flags-server";
+import { FEATURE_FLAG_KEYS } from "@/lib/feature-flags";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const session = await auth();
 
-  // Only ADMIN can access settings
-  if (!session?.user || session.user.role !== "ADMIN") {
+  if (!session?.user || !canAccessSettingsPage(session.user.role)) {
     redirect("/dashboard");
   }
 
-  const [locations, categories, units, users, departments, appSettings] = await Promise.all([
+  const isAdmin = session.user.role === "ADMIN";
+
+  const [
+    locations,
+    categories,
+    units,
+    users,
+    departments,
+    appSettings,
+    pendingInvitations,
+    resolvedFeatureFlags,
+  ] = await Promise.all([
     prisma.location.findMany({ orderBy: { name: "asc" } }),
     prisma.category.findMany({ orderBy: { name: "asc" } }),
     prisma.unit.findMany({ orderBy: { name: "asc" } }),
@@ -33,18 +52,102 @@ export default async function SettingsPage() {
     }),
     prisma.department.findMany({ orderBy: { name: "asc" } }),
     getAppSettings(),
+    isAdmin
+      ? prisma.userInvitation.findMany({
+          where: {
+            consumedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            emailNorm: true,
+            role: true,
+            expiresAt: true,
+            invitedBy: { select: { name: true, email: true } },
+          },
+        })
+      : Promise.resolve([]),
+    getResolvedFeatureFlags(),
+  ]);
+
+  const pendingInvitationRows: PendingInvitationRow[] = pendingInvitations.map((inv) => ({
+    id: inv.id,
+    emailNorm: inv.emailNorm,
+    role: inv.role,
+    expiresAt: inv.expiresAt.toISOString(),
+    invitedByLabel: inv.invitedBy.name?.trim() || inv.invitedBy.email,
+  }));
+
+  const featureFlagsFormRemountKey = FEATURE_FLAG_KEYS.map((k) =>
+    resolvedFeatureFlags[k] ? "1" : "0"
+  ).join("|");
+
+  const maintenanceBannerInitial = {
+    maintenanceBannerEnabled: appSettings.maintenanceBannerEnabled,
+    maintenanceBannerMessage: appSettings.maintenanceBannerMessage,
+    maintenanceBannerStartsAt: appSettings.maintenanceBannerStartsAt?.toISOString() ?? "",
+    maintenanceBannerEndsAt: appSettings.maintenanceBannerEndsAt?.toISOString() ?? "",
+  };
+  const maintenanceBannerFormRemountKey = JSON.stringify([
+    maintenanceBannerInitial.maintenanceBannerEnabled,
+    maintenanceBannerInitial.maintenanceBannerMessage,
+    maintenanceBannerInitial.maintenanceBannerStartsAt,
+    maintenanceBannerInitial.maintenanceBannerEndsAt,
   ]);
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" description="Manage system configuration — Admin access only" />
+      <PageHeader
+        title="Settings"
+        description={
+          isAdmin
+            ? "Manage system configuration and exception thresholds"
+            : "Org reference — locations, accounts, and catalog metadata. Threshold edits require an admin."
+        }
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ExceptionThresholdsForm
-          exceptionStaleSubmitDays={appSettings.exceptionStaleSubmitDays}
-          exceptionOverdueReceiveDays={appSettings.exceptionOverdueReceiveDays}
-          exceptionMinLowStockBranches={appSettings.exceptionMinLowStockBranches}
-        />
+        {isAdmin ? (
+          <>
+            <ExceptionThresholdsForm
+              exceptionStaleSubmitDays={appSettings.exceptionStaleSubmitDays}
+              exceptionOverdueReceiveDays={appSettings.exceptionOverdueReceiveDays}
+              exceptionMinLowStockBranches={appSettings.exceptionMinLowStockBranches}
+            />
+            <MaintenanceBannerForm
+              key={maintenanceBannerFormRemountKey}
+              initial={maintenanceBannerInitial}
+            />
+            <FeatureFlagsForm key={featureFlagsFormRemountKey} initial={resolvedFeatureFlags} />
+            <UserInvitationsAdmin pendingInvitations={pendingInvitationRows} />
+          </>
+        ) : (
+          <Card className="border-border border shadow-none">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">Exception thresholds</CardTitle>
+              <CardDescription>
+                Stale approval, overdue receive, and multi-branch low-stock rules (used on the
+                manager hub). Only administrators can change these values.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="text-muted-foreground space-y-1 text-sm">
+              <p>
+                <span className="text-foreground font-medium">Stale submit</span> —{" "}
+                {appSettings.exceptionStaleSubmitDays} day(s)
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Overdue receive</span> —{" "}
+                {appSettings.exceptionOverdueReceiveDays} day(s)
+              </p>
+              <p>
+                <span className="text-foreground font-medium">Min branches (low stock)</span> —{" "}
+                {appSettings.exceptionMinLowStockBranches}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Locations ── */}
         <Card className="border-border border shadow-none">

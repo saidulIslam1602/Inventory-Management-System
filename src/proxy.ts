@@ -1,28 +1,46 @@
 /**
- * Next.js 16+ request proxy (formerly `middleware.ts`) — route protection and RBAC.
+ * Next.js 16+ request proxy (formerly `middleware.ts`) — correlation id, route protection, RBAC.
  *
- * All /dashboard routes require authentication.
- * Role-based access is enforced per route group:
- *   /settings → ADMIN only
+ * Request correlation:
+ * - Sets/propagates `x-request-id` on **all** matched routes (including `/api/*`).
+ * - API routes get headers only; they do **not** run `withAuth` (handlers still call `auth()`).
+ *
+ * Role-based access is enforced per route group for pages:
+ *   /settings → ADMIN, MANAGER, VIEWER (STAFF redirected)
  *   /employees, /reports, /manager → STAFF blocked (redirect to /me)
- *   All listed prefixes → authentication required
+ *   /manager → VIEWER blocked (redirect to /dashboard)
+ *   /reports → VIEWER blocked (redirect to /dashboard)
+ *   Mutation-only paths → VIEWER blocked
  *
  * Unauthenticated users are redirected to /login.
+ * Users with mustChangePassword may only use /change-password (plus auth API routes) until they update.
  */
 
 import NextAuth from "next-auth";
 import authConfig from "@/lib/auth.config";
-import { canAccessAdminSettings, staffBlockedPathname } from "@/lib/rbac";
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import {
+  REQUEST_ID_HEADER,
+  forwardHeadersWithRequestId,
+  resolveRequestId,
+} from "@/lib/request-correlation-edge";
+import { maybeHttpsUpgradeRedirect } from "@/lib/https-upgrade";
+import {
+  canAccessSettingsPage,
+  staffBlockedPathname,
+  viewerBlockedManagerHubPathname,
+  viewerBlockedReportsPathname,
+  viewerBlockedWritePathname,
+} from "@/lib/rbac";
+import { NextResponse, NextRequest } from "next/server";
+import type { NextFetchEvent, NextMiddleware } from "next/server";
 
-/** Keep this file free of Prisma/bcrypt — Node-only modules break the Edge bundle. */
+/** Keep Prisma/bcrypt out — Edge bundle. */
 const { auth: withAuth } = NextAuth(authConfig);
 
-// Routes that require authentication (edge redirect before RSC; APIs use per-route auth())
 const PROTECTED_PREFIXES = [
   "/dashboard",
   "/me",
+  "/profile",
   "/manager",
   "/inventory",
   "/purchase-orders",
@@ -34,35 +52,116 @@ const PROTECTED_PREFIXES = [
   "/settings",
 ];
 
-export default withAuth((req: NextRequest & { auth: { user?: { role?: string } } | null }) => {
+type AuthedUser = { role?: string; mustChangePassword?: boolean };
+
+function rbacRedirect(req: NextRequest & { auth: { user?: AuthedUser } | null }) {
+  const requestId = req.headers.get(REQUEST_ID_HEADER) ?? crypto.randomUUID();
+
+  const attach = (res: NextResponse) => {
+    res.headers.set(REQUEST_ID_HEADER, requestId);
+    return res;
+  };
+
+  const nextWithCorrelation = () =>
+    attach(
+      NextResponse.next({
+        request: { headers: forwardHeadersWithRequestId(req, requestId) },
+      })
+    );
+
+  const redirectWithCorrelation = (url: URL) => attach(NextResponse.redirect(url));
+
   const { pathname } = req.nextUrl;
+  const user = req.auth?.user;
+  const mustChange = user?.mustChangePassword === true;
 
-  // Check if the route needs protection
-  const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-  if (!isProtected) return NextResponse.next();
+  const isChangePassword = pathname.startsWith("/change-password");
+  const isPublicAuthPath =
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/reset-password") ||
+    pathname.startsWith("/invite");
 
-  // Redirect unauthenticated users to login
-  if (!req.auth?.user) {
-    const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(loginUrl);
+  if (isChangePassword) {
+    if (!user) {
+      const loginUrl = new URL("/login", req.url);
+      loginUrl.searchParams.set("callbackUrl", "/change-password");
+      return redirectWithCorrelation(loginUrl);
+    }
+    return nextWithCorrelation();
   }
 
-  // Enforce admin-only routes
-  const role = req.auth.user.role;
+  if (mustChange && isPublicAuthPath) {
+    return redirectWithCorrelation(new URL("/change-password", req.url));
+  }
 
-  if (pathname.startsWith("/settings") && !canAccessAdminSettings(role)) {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+  const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  if (!isProtected) {
+    return nextWithCorrelation();
+  }
+
+  if (!user) {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", pathname);
+    return redirectWithCorrelation(loginUrl);
+  }
+
+  if (mustChange) {
+    return redirectWithCorrelation(new URL("/change-password", req.url));
+  }
+
+  const role = user.role;
+
+  if (pathname.startsWith("/settings") && !canAccessSettingsPage(role)) {
+    return redirectWithCorrelation(new URL("/dashboard", req.url));
+  }
+
+  if (
+    (pathname.startsWith("/settings/audit-log") || pathname.startsWith("/settings/data-quality")) &&
+    role !== "ADMIN"
+  ) {
+    return redirectWithCorrelation(new URL("/settings", req.url));
   }
 
   if (role === "STAFF" && staffBlockedPathname(pathname)) {
-    return NextResponse.redirect(new URL("/me", req.url));
+    return redirectWithCorrelation(new URL("/me", req.url));
   }
 
-  return NextResponse.next();
-});
+  if (role === "VIEWER" && viewerBlockedManagerHubPathname(pathname)) {
+    return redirectWithCorrelation(new URL("/dashboard", req.url));
+  }
+
+  if (role === "VIEWER" && viewerBlockedReportsPathname(pathname)) {
+    return redirectWithCorrelation(new URL("/dashboard", req.url));
+  }
+
+  if (role === "VIEWER" && viewerBlockedWritePathname(pathname)) {
+    return redirectWithCorrelation(new URL("/dashboard", req.url));
+  }
+
+  return nextWithCorrelation();
+}
+
+const rbacMiddleware = withAuth(rbacRedirect);
+
+export default function middleware(req: NextRequest, event: NextFetchEvent) {
+  const requestId = resolveRequestId(req);
+  const requestHeaders = forwardHeadersWithRequestId(req, requestId);
+
+  if (req.nextUrl.pathname.startsWith("/api/")) {
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    res.headers.set(REQUEST_ID_HEADER, requestId);
+    return res;
+  }
+
+  const httpsRedirect = maybeHttpsUpgradeRedirect(req);
+  if (httpsRedirect) return httpsRedirect;
+
+  const reqForRbac = new NextRequest(req, { headers: requestHeaders });
+  // NextAuth `auth()` overload typings target route handlers; middleware runtime matches NextMiddleware.
+  return (rbacMiddleware as unknown as NextMiddleware)(reqForRbac, event);
+}
 
 export const config = {
-  // Run on all routes except static assets and API routes that handle auth themselves
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

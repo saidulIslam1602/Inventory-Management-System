@@ -8,6 +8,13 @@ import { getAppSettings } from "@/lib/app-settings";
 import { todayOsloPrismaDate } from "@/lib/business-calendar";
 import { differenceInCalendarDays, subDays } from "date-fns";
 
+import { formatQuantityNbNo } from "@/lib/utils";
+import {
+  pendingApprovalAgingTier,
+  receivingPipelineAgingTier,
+  type ManagerPendingAgingTier,
+} from "@/lib/manager-aging";
+
 export type LocationScorecard = {
   id: string;
   name: string;
@@ -52,6 +59,7 @@ export type ReceiveBacklogRow = {
   status: string;
   supplierName: string;
   locationName: string;
+  locationId: string;
   expectedDate: Date | null;
   updatedAt: Date;
   daysSinceOrder: number;
@@ -62,9 +70,32 @@ export type PendingApprovalPO = {
   poNumber: string;
   supplierName: string;
   locationName: string;
+  locationId: string;
   totalAmount: number;
   createdAt: Date;
   daysWaiting: number;
+};
+
+/** Unified “needs you” rows for `/manager` decision inbox. */
+export type ManagerDecisionQueueKind =
+  | "exception"
+  | "po_approve"
+  | "receive_backlog"
+  | "transfer_suggested";
+
+export type ManagerDecisionQueueItem = {
+  id: string;
+  kind: ManagerDecisionQueueKind;
+  /** Higher = surfaced earlier */
+  sortScore: number;
+  badge: string;
+  title: string;
+  subtitle: string;
+  meta?: string;
+  href: string;
+  accent?: "destructive" | "warning";
+  /** Present for `po_approve` and `receive_backlog` — UI aging strip + badge */
+  slaTier?: ManagerPendingAgingTier;
 };
 
 export type AttendanceByLocation = {
@@ -108,11 +139,22 @@ export type MaterialRiskRow = {
   onHand: number;
 };
 
-export async function getLocationScorecards(): Promise<LocationScorecard[]> {
+/** Active branches for `/manager` team filter & validation. */
+export async function getManagerBranchOptions() {
+  return prisma.location.findMany({
+    where: { isActive: true },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
+}
+
+export async function getLocationScorecards(
+  branchLocationId?: string
+): Promise<LocationScorecard[]> {
   const today = todayOsloPrismaDate();
 
   const locations = await prisma.location.findMany({
-    where: { isActive: true },
+    where: { isActive: true, ...(branchLocationId ? { id: branchLocationId } : {}) },
     orderBy: { name: "asc" },
     select: { id: true, name: true, type: true },
   });
@@ -174,24 +216,74 @@ export async function getLocationScorecards(): Promise<LocationScorecard[]> {
   }));
 }
 
-export async function getTransferSuggestions(limit = 25): Promise<TransferSuggestion[]> {
-  const rows = await prisma.$queryRaw<
-    Array<{
-      productId: string;
-      sku: string;
-      productName: string;
-      symbol: string;
-      fromStockId: string;
-      fromLocationId: string;
-      fromName: string;
-      fromQty: unknown;
-      availableUnreserved: unknown;
-      toLocationId: string;
-      toName: string;
-      toQty: unknown;
-      reorderPoint: unknown;
-    }>
-  >`
+export async function getTransferSuggestions(
+  limit = 25,
+  branchLocationId?: string
+): Promise<TransferSuggestion[]> {
+  const rows = branchLocationId
+    ? await prisma.$queryRaw<
+        Array<{
+          productId: string;
+          sku: string;
+          productName: string;
+          symbol: string;
+          fromStockId: string;
+          fromLocationId: string;
+          fromName: string;
+          fromQty: unknown;
+          availableUnreserved: unknown;
+          toLocationId: string;
+          toName: string;
+          toQty: unknown;
+          reorderPoint: unknown;
+        }>
+      >`
+    SELECT
+      p.id as "productId",
+      p.sku,
+      p.name as "productName",
+      u.symbol,
+      s_from.id as "fromStockId",
+      s_from."locationId" as "fromLocationId",
+      l_from.name as "fromName",
+      s_from.quantity as "fromQty",
+      (s_from.quantity - s_from.reserved) as "availableUnreserved",
+      s_to."locationId" as "toLocationId",
+      l_to.name as "toName",
+      s_to.quantity as "toQty",
+      s_to."reorderPoint" as "reorderPoint"
+    FROM stock s_from
+    JOIN stock s_to ON s_to."productId" = s_from."productId" AND s_to."locationId" != s_from."locationId"
+    JOIN products p ON p.id = s_from."productId"
+    JOIN units u ON u.id = p."unitId"
+    JOIN locations l_from ON l_from.id = s_from."locationId"
+    JOIN locations l_to ON l_to.id = s_to."locationId"
+    WHERE s_to.quantity <= s_to."reorderPoint"
+      AND s_to."reorderPoint" > 0
+      AND s_from.quantity > s_from."reorderPoint" + (s_to."reorderPoint" * 0.5)
+      AND (s_from.quantity - s_from.reserved) > 0
+      AND l_from."isActive" = true AND l_to."isActive" = true AND p."isActive" = true
+      AND (s_to."locationId" = ${branchLocationId} OR s_from."locationId" = ${branchLocationId})
+    ORDER BY (s_to."reorderPoint" - s_to.quantity) DESC, s_from.quantity DESC
+    LIMIT ${limit}
+  `
+    : await prisma.$queryRaw<
+        Array<{
+          productId: string;
+          sku: string;
+          productName: string;
+          symbol: string;
+          fromStockId: string;
+          fromLocationId: string;
+          fromName: string;
+          fromQty: unknown;
+          availableUnreserved: unknown;
+          toLocationId: string;
+          toName: string;
+          toQty: unknown;
+          reorderPoint: unknown;
+        }>
+      >`
     SELECT
       p.id as "productId",
       p.sku,
@@ -246,9 +338,14 @@ export async function getTransferSuggestions(limit = 25): Promise<TransferSugges
   });
 }
 
-export async function getPendingApprovalPOs(): Promise<PendingApprovalPO[]> {
+export async function getPendingApprovalPOs(
+  branchLocationId?: string
+): Promise<PendingApprovalPO[]> {
   const pos = await prisma.purchaseOrder.findMany({
-    where: { status: "SUBMITTED" },
+    where: {
+      status: "SUBMITTED",
+      ...(branchLocationId ? { locationId: branchLocationId } : {}),
+    },
     orderBy: { createdAt: "asc" },
     take: 50,
     include: {
@@ -262,15 +359,19 @@ export async function getPendingApprovalPOs(): Promise<PendingApprovalPO[]> {
     poNumber: po.poNumber,
     supplierName: po.supplier.name,
     locationName: po.location.name,
+    locationId: po.locationId,
     totalAmount: Number(po.totalAmount),
     createdAt: po.createdAt,
     daysWaiting: Math.max(0, differenceInCalendarDays(now, po.createdAt)),
   }));
 }
 
-export async function getReceiveBacklog(): Promise<ReceiveBacklogRow[]> {
+export async function getReceiveBacklog(branchLocationId?: string): Promise<ReceiveBacklogRow[]> {
   const pos = await prisma.purchaseOrder.findMany({
-    where: { status: { in: ["ORDERED", "PARTIALLY_RECEIVED"] } },
+    where: {
+      status: { in: ["ORDERED", "PARTIALLY_RECEIVED"] },
+      ...(branchLocationId ? { locationId: branchLocationId } : {}),
+    },
     orderBy: { updatedAt: "asc" },
     take: 40,
     include: {
@@ -285,16 +386,19 @@ export async function getReceiveBacklog(): Promise<ReceiveBacklogRow[]> {
     status: po.status,
     supplierName: po.supplier.name,
     locationName: po.location.name,
+    locationId: po.locationId,
     expectedDate: po.expectedDate,
     updatedAt: po.updatedAt,
     daysSinceOrder: differenceInCalendarDays(now, po.updatedAt),
   }));
 }
 
-export async function getAttendanceSnapshotByLocation(): Promise<AttendanceByLocation[]> {
+export async function getAttendanceSnapshotByLocation(
+  branchLocationId?: string
+): Promise<AttendanceByLocation[]> {
   const today = todayOsloPrismaDate();
   const locations = await prisma.location.findMany({
-    where: { isActive: true },
+    where: { isActive: true, ...(branchLocationId ? { id: branchLocationId } : {}) },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
@@ -348,26 +452,28 @@ export async function getAttendanceSnapshotByLocation(): Promise<AttendanceByLoc
   });
 }
 
-export async function getProjectPortfolio(): Promise<{
+export async function getProjectPortfolio(branchLocationId?: string): Promise<{
   byStatus: Array<{ status: string; count: number }>;
   active: ProjectPortfolioRow[];
   onHold: ProjectPortfolioRow[];
 }> {
+  const locFilter = branchLocationId ? { locationId: branchLocationId } : {};
   const grouped = await prisma.project.groupBy({
     by: ["status"],
+    where: locFilter,
     _count: { _all: true },
   });
   const byStatus = grouped.map((g) => ({ status: g.status, count: g._count._all }));
 
   const [active, onHold] = await Promise.all([
     prisma.project.findMany({
-      where: { status: "IN_PROGRESS" },
+      where: { status: "IN_PROGRESS", ...locFilter },
       take: 15,
       orderBy: { updatedAt: "desc" },
       include: { location: { select: { name: true } } },
     }),
     prisma.project.findMany({
-      where: { status: "ON_HOLD" },
+      where: { status: "ON_HOLD", ...locFilter },
       take: 10,
       orderBy: { updatedAt: "desc" },
       include: { location: { select: { name: true } } },
@@ -427,19 +533,96 @@ export async function getAggregatedLowStockAlerts(limit = 20): Promise<ReorderAg
   }));
 }
 
-export async function getProjectMaterialRisks(limit = 15): Promise<MaterialRiskRow[]> {
+/** SKUs below reorder at a single branch — used when `/manager` is scoped to one location. */
+export async function getLowStockSkusAtBranch(
+  branchLocationId: string,
+  limit = 15
+): Promise<ReorderAggRow[]> {
   const rows = await prisma.$queryRaw<
     Array<{
-      projectId: string;
-      projectCode: string;
-      name: string;
-      locationName: string;
+      productId: string;
       sku: string;
-      productName: string;
-      reserved: unknown;
-      onHand: unknown;
+      name: string;
+      symbol: string;
+      totalQty: unknown;
     }>
   >`
+    SELECT
+      p.id as "productId",
+      p.sku,
+      p.name,
+      u.symbol,
+      s.quantity as "totalQty"
+    FROM stock s
+    JOIN products p ON p.id = s."productId"
+    JOIN units u ON u.id = p."unitId"
+    WHERE p."isActive" = true
+      AND s."locationId" = ${branchLocationId}
+      AND s.quantity <= s."reorderPoint"
+      AND s."reorderPoint" > 0
+    ORDER BY (s."reorderPoint" - s.quantity) DESC, s.quantity ASC
+    LIMIT ${limit}
+  `;
+  return rows.map((r) => ({
+    productId: r.productId,
+    sku: r.sku,
+    name: r.name,
+    unitSymbol: r.symbol,
+    lowLocationCount: 1,
+    totalQty: Number(r.totalQty),
+  }));
+}
+
+export async function getProjectMaterialRisks(
+  limit = 15,
+  branchLocationId?: string
+): Promise<MaterialRiskRow[]> {
+  const rows = branchLocationId
+    ? await prisma.$queryRaw<
+        Array<{
+          projectId: string;
+          projectCode: string;
+          name: string;
+          locationName: string;
+          sku: string;
+          productName: string;
+          reserved: unknown;
+          onHand: unknown;
+        }>
+      >`
+    SELECT
+      p.id as "projectId",
+      p."projectCode",
+      p.name,
+      l.name as "locationName",
+      pr.sku,
+      pr.name as "productName",
+      pm."reservedQuantity" as reserved,
+      s.quantity as "onHand"
+    FROM projects p
+    JOIN project_materials pm ON pm."projectId" = p.id
+    JOIN products pr ON pr.id = pm."productId"
+    JOIN stock s ON s."productId" = pr.id AND s."locationId" = p."locationId"
+    JOIN locations l ON l.id = p."locationId"
+    WHERE p.status = 'IN_PROGRESS'
+      AND p."locationId" = ${branchLocationId}
+      AND pm."reservedQuantity" > 0
+      AND s.quantity < pm."reservedQuantity"
+    ORDER BY (pm."reservedQuantity" - s.quantity) DESC
+    LIMIT ${limit}
+  `
+    : await prisma.$queryRaw<
+        Array<{
+          projectId: string;
+          projectCode: string;
+          name: string;
+          locationName: string;
+          sku: string;
+          productName: string;
+          reserved: unknown;
+          onHand: unknown;
+        }>
+      >`
     SELECT
       p.id as "projectId",
       p."projectCode",
@@ -485,7 +668,15 @@ export async function getManagerDigestStats() {
   return { movementsIn, movementsOut, posSubmitted, projectsNew, since: weekAgo };
 }
 
-export async function buildExceptionQueue(): Promise<ExceptionItem[]> {
+export type BuildExceptionQueueOptions = {
+  /** When set, only exceptions relevant to this branch (manager team filter). */
+  locationId?: string;
+};
+
+export async function buildExceptionQueue(
+  opts: BuildExceptionQueueOptions = {}
+): Promise<ExceptionItem[]> {
+  const { locationId } = opts;
   const settings = await getAppSettings();
   const items: ExceptionItem[] = [];
   const today = todayOsloPrismaDate();
@@ -494,12 +685,16 @@ export async function buildExceptionQueue(): Promise<ExceptionItem[]> {
   const lateReceiveCutoff = subDays(now, settings.exceptionOverdueReceiveDays);
   const minLowBranches = settings.exceptionMinLowStockBranches;
 
-  const materialRisksFirst = await getProjectMaterialRisks(5);
+  const materialRisksFirst = await getProjectMaterialRisks(5, locationId);
 
   const [staleSubmitted, overdueReceive, lowStockLocs, onHoldProjects, lateToday] =
     await Promise.all([
       prisma.purchaseOrder.findMany({
-        where: { status: "SUBMITTED", createdAt: { lt: staleSubmitCutoff } },
+        where: {
+          status: "SUBMITTED",
+          createdAt: { lt: staleSubmitCutoff },
+          ...(locationId ? { locationId } : {}),
+        },
         take: 20,
         orderBy: { createdAt: "asc" },
         select: { id: true, poNumber: true, createdAt: true },
@@ -511,18 +706,34 @@ export async function buildExceptionQueue(): Promise<ExceptionItem[]> {
             { expectedDate: { lt: lateReceiveCutoff, not: null } },
             { expectedDate: null, updatedAt: { lt: lateReceiveCutoff } },
           ],
+          ...(locationId ? { locationId } : {}),
         },
         take: 20,
         orderBy: { expectedDate: "asc" },
         select: { id: true, poNumber: true, expectedDate: true },
       }),
-      prisma.$queryRaw<Array<{ c: bigint }>>`
+      locationId
+        ? prisma.$queryRaw<Array<{ c: bigint }>>`
+        SELECT COUNT(DISTINCT s."locationId")::bigint as c FROM stock s
+        WHERE s.quantity <= s."reorderPoint" AND s."reorderPoint" > 0
+          AND s."locationId" = ${locationId}
+      `
+        : prisma.$queryRaw<Array<{ c: bigint }>>`
         SELECT COUNT(DISTINCT s."locationId")::bigint as c FROM stock s
         WHERE s.quantity <= s."reorderPoint" AND s."reorderPoint" > 0
       `,
-      prisma.project.count({ where: { status: "ON_HOLD" } }),
+      prisma.project.count({
+        where: {
+          status: "ON_HOLD",
+          ...(locationId ? { locationId } : {}),
+        },
+      }),
       prisma.attendance.count({
-        where: { date: today, status: "LATE" },
+        where: {
+          date: today,
+          status: "LATE",
+          ...(locationId ? { employee: { locationId } } : {}),
+        },
       }),
     ]);
 
@@ -552,7 +763,7 @@ export async function buildExceptionQueue(): Promise<ExceptionItem[]> {
     });
   }
 
-  if (lowLocCount >= minLowBranches) {
+  if (!locationId && lowLocCount >= minLowBranches) {
     items.push({
       id: "low-stock-multi",
       severity: "high",
@@ -598,4 +809,99 @@ export async function buildExceptionQueue(): Promise<ExceptionItem[]> {
 
   items.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "high" ? -1 : 1));
   return items.slice(0, 40);
+}
+
+/**
+ * Merges exception queue, PO approvals, receiving backlog, and transfer hints into one
+ * prioritized list for the manager hub “decision inbox”.
+ */
+export function buildManagerDecisionQueue(input: {
+  exceptions: ExceptionItem[];
+  approvals: PendingApprovalPO[];
+  receiveBacklog: ReceiveBacklogRow[];
+  transfers: TransferSuggestion[];
+  transferLimit?: number;
+}): ManagerDecisionQueueItem[] {
+  const staleApprovePoIds = new Set(
+    input.exceptions
+      .filter((e) => e.id.startsWith("po-stale-"))
+      .map((e) => e.id.replace("po-stale-", ""))
+  );
+  const overdueRecvPoIds = new Set(
+    input.exceptions
+      .filter((e) => e.id.startsWith("po-recv-"))
+      .map((e) => e.id.replace("po-recv-", ""))
+  );
+
+  const out: ManagerDecisionQueueItem[] = [];
+
+  input.exceptions.forEach((ex, i) => {
+    const base = ex.severity === "high" ? 1_000_000 : 880_000;
+    out.push({
+      id: `ex:${ex.id}`,
+      kind: "exception",
+      sortScore: base - i * 50,
+      badge: ex.category,
+      title: ex.title,
+      subtitle: ex.detail,
+      meta: ex.severity === "high" ? "High" : "Medium",
+      href: ex.href,
+      accent: ex.severity === "high" ? "destructive" : "warning",
+    });
+  });
+
+  for (const po of input.approvals) {
+    if (staleApprovePoIds.has(po.id)) continue;
+    const score = 420_000 + Math.min(po.daysWaiting, 200) * 600;
+    out.push({
+      id: `approve:${po.id}`,
+      kind: "po_approve",
+      sortScore: score,
+      badge: "Approve PO",
+      title: po.poNumber,
+      subtitle: `${po.supplierName} · ${po.locationName}`,
+      meta: `${po.totalAmount.toLocaleString("nb-NO", { style: "currency", currency: "NOK", minimumFractionDigits: 2 })} · queued ${po.daysWaiting}d`,
+      href: `/purchase-orders/${po.id}`,
+      accent: po.daysWaiting >= 3 ? "warning" : undefined,
+      slaTier: pendingApprovalAgingTier(po.daysWaiting),
+    });
+  }
+
+  for (const po of input.receiveBacklog) {
+    if (overdueRecvPoIds.has(po.id)) continue;
+    const score = 260_000 + Math.min(po.daysSinceOrder, 180) * 700;
+    out.push({
+      id: `recv:${po.id}`,
+      kind: "receive_backlog",
+      sortScore: score,
+      badge: "Receiving",
+      title: po.poNumber,
+      subtitle: `${po.supplierName} · ${po.locationName}`,
+      meta: `${po.status.replace(/_/g, " ")} · ${po.daysSinceOrder}d since update`,
+      href: `/purchase-orders/${po.id}`,
+      accent: po.daysSinceOrder >= 7 ? "warning" : undefined,
+      slaTier: receivingPipelineAgingTier(po.daysSinceOrder),
+    });
+  }
+
+  const tLimit = input.transferLimit ?? 15;
+  input.transfers.slice(0, tLimit).forEach((t, i) => {
+    const shortfall = Math.max(0, t.reorderPoint - t.toQty);
+    const score =
+      120_000 - i * 25 + Math.min(t.suggestedQty, 999) * 40 + Math.min(shortfall, 999) * 15;
+    out.push({
+      id: `xfer:${t.fromStockId}-${t.toLocationId}-${t.productId}`,
+      kind: "transfer_suggested",
+      sortScore: score,
+      badge: "Transfer",
+      title: t.sku,
+      subtitle: t.productName,
+      meta: `${t.fromLocationName} → ${t.toLocationName} · suggest ${formatQuantityNbNo(t.suggestedQty, t.unitSymbol)}`,
+      href: `/inventory/movements?product=${encodeURIComponent(t.productId)}`,
+      accent: t.reorderPoint > 1e-9 && shortfall >= t.reorderPoint * 0.5 ? "warning" : undefined,
+    });
+  });
+
+  out.sort((a, b) => b.sortScore - a.sortScore);
+  return out;
 }

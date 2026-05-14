@@ -19,6 +19,8 @@
 //   ProjectMaterial           — Materials reserved/consumed per project
 //   Notification              — DB-stored alert queue (low-stock, PO events)
 //   PurchaseOrderAuditLog     — Append-only PO status / receipt events (digest + PO detail)
+//   AuditEvent                — Append-only org/security audit (settings, exports, auth, invites, directory CRUD)
+//   ManagedDocument           — Manager Document Portal: contracts, invoices, other files (stored as bytes)
 // ──────────────────────────────────────────────────────────────────────────────
 
 generator client {
@@ -67,10 +69,11 @@ enum POStatus {
   CANCELLED
 }
 
-/// Immutable PO lifecycle entries for digests and audit (status changes + receiving events).
+/// Immutable PO lifecycle entries for digests and audit (status changes + receiving events + escalation notes).
 enum POAuditEventKind {
   STATUS_CHANGE
   RECEIPT
+  ESCALATION_NOTE
 }
 
 enum ProjectStatus {
@@ -95,10 +98,27 @@ enum NotificationType {
   PO_APPROVED
   PO_ORDERED
   PO_RECEIVED
+  PO_APPROVAL_OVERDUE
   PROJECT_STARTED
   PROJECT_COMPLETED
   DAILY_DIGEST
   SYSTEM
+}
+
+/// Append-only org / security audit trail (settings, exports, invitations, auth, domain CRUD).
+enum AuditEventCategory {
+  SETTINGS
+  EXPORT
+  SECURITY
+  AUTH
+  DATA
+}
+
+/// Category for manager-uploaded documents in the Document Portal.
+enum DocCategory {
+  CONTRACT
+  INVOICE
+  OTHER
 }
 
 // ─────────────────────────────────────────────
@@ -112,10 +132,14 @@ model User {
   emailVerified DateTime?
   image         String?
   passwordHash  String?   // Hashed with bcryptjs for credentials provider
+  /// Set true when provisioning a default password; cleared after the user sets their own.
+  mustChangePassword Boolean @default(false)
   role          UserRole  @default(VIEWER)
   isActive      Boolean   @default(true)
   /// Per-user notification delivery preferences (instant PO events, daily digest). See `notification-preferences.ts`.
   notificationPreferences Json?
+  /// Viewer dashboard shortcuts: `{ "productIds": string[], "projectIds": string[] }`. See `dashboard-pins.ts`.
+  dashboardPins Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -126,8 +150,64 @@ model User {
   purchaseOrders PurchaseOrder[]
   poAuditLogs    PurchaseOrderAuditLog[]
   notifications  Notification[]
+  invitationsSent UserInvitation[] @relation("UserInvitationsSent")
+  auditEvents     AuditEvent[]
+  managedDocuments ManagedDocument[]
 
   @@map("users")
+}
+
+model AuditEvent {
+  id          String              @id @default(cuid())
+  createdAt   DateTime            @default(now())
+  actorUserId String?
+  actorEmail  String?
+  category    AuditEventCategory
+  action      String              @db.VarChar(128)
+  targetType  String?             @db.VarChar(64)
+  targetId    String?             @db.VarChar(64)
+  summary     String              @db.VarChar(1024)
+  metadata    Json?
+  ipAddress   String?             @db.VarChar(64)
+  userAgent   String?             @db.VarChar(512)
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([category])
+  @@index([actorUserId])
+  @@map("audit_events")
+}
+
+/// Admin-issued invite link: recipient completes sign-up (password + name). SSO/SCIM out of scope for now.
+model UserInvitation {
+  id          String    @id @default(cuid())
+  emailNorm   String
+  role        UserRole
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  revokedAt   DateTime?
+  invitedById String
+  invitedBy   User      @relation("UserInvitationsSent", fields: [invitedById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([emailNorm])
+  @@map("user_invitations")
+}
+
+/// Single-use email OTP for forgot-password (hashed code, time-limited).
+model PasswordResetOtp {
+  id         String    @id @default(cuid())
+  emailNorm  String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([emailNorm])
+  @@map("password_reset_otps")
 }
 
 model Account {
@@ -148,6 +228,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([provider, providerAccountId])
+  @@index([userId])
   @@map("accounts")
 }
 
@@ -160,6 +241,7 @@ model Session {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("sessions")
 }
 
@@ -265,6 +347,10 @@ model Product {
   purchaseOrderItems PurchaseOrderItem[]
   projectMaterials  ProjectMaterial[]
 
+  @@index([categoryId])
+  @@index([unitId])
+  @@index([supplierId])
+  @@index([isActive, name])
   @@map("products")
 }
 
@@ -289,6 +375,8 @@ model Stock {
   movements StockMovement[]
 
   @@unique([productId, locationId])
+  /// Branch-scoped low-stock raw SQL + me/my-branch widgets (`WHERE locationId = ?`).
+  @@index([locationId])
   @@map("stock")
 }
 
@@ -323,6 +411,15 @@ model StockMovement {
   // Optional link to a project consumption event
   projectId String?
   project   Project? @relation(fields: [projectId], references: [id])
+
+  /// Ledger lists + dashboard “recent movements” (orderBy createdAt desc).
+  @@index([createdAt(sort: Desc)])
+  /// Product detail + movements filtered via stock.productId / stockId.
+  @@index([stockId, createdAt(sort: Desc)])
+  /// Weekly IN/OUT counters (`manager-overview`, digest-adjacent counts).
+  @@index([type, createdAt(sort: Desc)])
+  @@index([purchaseOrderId])
+  @@index([projectId])
 
   @@map("stock_movements")
 }
@@ -376,6 +473,14 @@ model PurchaseOrder {
   stockMovements StockMovement[]
   auditLogs     PurchaseOrderAuditLog[]
 
+  /// PO list default sort + exports.
+  @@index([createdAt(sort: Desc)])
+  /// Filtered lists + `groupBy` status tabs.
+  @@index([status, createdAt(sort: Desc)])
+  /// Branch-scoped manager hub pipelines.
+  @@index([locationId, status, updatedAt(sort: Desc)])
+  @@index([supplierId])
+
   @@map("purchase_orders")
 }
 
@@ -412,6 +517,8 @@ model PurchaseOrderItem {
   productId String
   product   Product @relation(fields: [productId], references: [id])
 
+  @@index([purchaseOrderId])
+  @@index([productId])
   @@map("purchase_order_items")
 }
 
@@ -427,6 +534,8 @@ model Employee {
   lastName     String
   phone        String?
   address      String?
+  /// Citizenship / nationality on file (e.g. «Norsk»). Self-service edit where policy allows.
+  nationality  String?
   photoUrl     String?
   hireDate     DateTime
   isActive     Boolean  @default(true)
@@ -446,6 +555,9 @@ model Employee {
   shifts       Shift[]
   projects     ProjectEmployee[]
 
+  @@index([locationId])
+  @@index([departmentId])
+  @@index([isActive])
   @@map("employees")
 }
 
@@ -465,6 +577,8 @@ model Attendance {
   employee   Employee @relation(fields: [employeeId], references: [id])
 
   @@unique([employeeId, date])
+  /// Org-wide attendance log (`date >= since`, orderBy date desc).
+  @@index([date(sort: Desc)])
   @@map("attendance")
 }
 
@@ -480,6 +594,7 @@ model Shift {
   employeeId String
   employee   Employee @relation(fields: [employeeId], references: [id])
 
+  @@index([employeeId, startTime(sort: Asc)])
   @@map("shifts")
 }
 
@@ -533,6 +648,11 @@ model Project {
   materials     ProjectMaterial[]
   stockMovements StockMovement[]
 
+  @@index([createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([locationId])
+  @@index([customerId])
+
   @@map("projects")
 }
 
@@ -582,9 +702,33 @@ model AppSettings {
   exceptionOverdueReceiveDays     Int      @default(7)
   /// Minimum distinct locations with a sub–reorder SKU to raise multi-branch low-stock exception
   exceptionMinLowStockBranches   Int      @default(2)
+  /// Org-wide feature switches (JSON). Missing keys default to enabled in code.
+  featureFlags                   Json?
+  maintenanceBannerEnabled       Boolean  @default(false)
+  maintenanceBannerMessage       String   @default("")
+  maintenanceBannerStartsAt      DateTime?
+  maintenanceBannerEndsAt        DateTime?
   updatedAt                     DateTime @updatedAt
 
   @@map("app_settings")
+}
+
+/// Document Portal — manager-uploaded contracts, invoices and other files (stored as raw bytes in DB).
+model ManagedDocument {
+  id           String      @id @default(cuid())
+  name         String
+  category     DocCategory
+  mimeType     String      @db.VarChar(128)
+  sizeBytes    Int
+  /// Raw file bytes stored directly in PostgreSQL.
+  content      Bytes
+  uploadedById String
+  uploadedBy   User        @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([uploadedById, createdAt(sort: Desc)])
+  @@map("managed_documents")
 }
 
 /// DB-stored notification queue (low-stock alerts, PO events, etc.)
@@ -600,6 +744,11 @@ model Notification {
 
   userId String
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Header / Me portal lists (`userId`, orderBy createdAt desc).
+  @@index([userId, createdAt(sort: Desc)])
+  /// Unread badge count on every dashboard layout load.
+  @@index([userId, isRead])
 
   @@map("notifications")
 }

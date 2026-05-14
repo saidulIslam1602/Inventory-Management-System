@@ -24,6 +24,9 @@ import {
   Settings,
   Zap,
   LogOut,
+  KeyRound,
+  ScrollText,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -42,6 +45,7 @@ import type { NavItem } from "@/types";
 import type { UserRole } from "@prisma/client";
 import { logout } from "@/lib/actions/auth";
 import { clearAuthPageCaches } from "@/lib/pwa-cache";
+import { canAccessAuditLogPage, canAccessDataQualityPage, canAccessSettingsPage } from "@/lib/rbac";
 
 const STAFF_EXCLUDED_HREF = new Set(["/employees", "/reports", "/manager"]);
 
@@ -60,7 +64,8 @@ const NAV_CORE: NavItem[] = [
     title: "Manager hub",
     href: "/manager",
     icon: Building2,
-    roles: ["ADMIN", "MANAGER", "VIEWER"],
+    roles: ["ADMIN", "MANAGER"],
+    featureFlag: "managerHub",
   },
   {
     title: "Inventory",
@@ -76,39 +81,57 @@ const NAV_CORE: NavItem[] = [
     title: "Purchase Orders",
     href: "/purchase-orders",
     icon: ShoppingCart,
+    featureFlag: "purchaseOrders",
   },
   {
     title: "Employees",
     href: "/employees",
     icon: Users,
+    featureFlag: "employees",
   },
   {
     title: "Projects",
     href: "/projects",
     icon: FolderKanban,
+    featureFlag: "projects",
   },
   {
     title: "Customers",
     href: "/customers",
     icon: Contact,
+    featureFlag: "customers",
   },
   {
     title: "Reports",
     href: "/reports",
     icon: BarChart3,
+    featureFlag: "reports",
+    roles: ["ADMIN", "MANAGER"],
   },
 ];
+
+import type { ResolvedFeatureFlags } from "@/lib/feature-flags";
 
 interface AppSidebarProps {
   userRole: UserRole;
   lowStockCount?: number;
   pendingPOCount?: number;
+  featureFlags: ResolvedFeatureFlags;
 }
 
-export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: AppSidebarProps) {
+export function AppSidebar({
+  userRole,
+  lowStockCount = 0,
+  pendingPOCount = 0,
+  featureFlags,
+}: AppSidebarProps) {
   const pathname = usePathname();
 
+  const isSettingsLeafRoute =
+    pathname.startsWith("/settings/audit-log") || pathname.startsWith("/settings/data-quality");
+
   const navItems = NAV_CORE.filter((item) => {
+    if (item.featureFlag && !featureFlags[item.featureFlag]) return false;
     if (userRole === "STAFF" && STAFF_EXCLUDED_HREF.has(item.href)) return false;
     if (item.roles?.length && !item.roles.includes(userRole)) return false;
     return true;
@@ -180,31 +203,78 @@ export function AppSidebar({ userRole, lowStockCount = 0, pendingPOCount = 0 }: 
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* ── Settings group ── */}
-        <SidebarGroup className="mt-auto">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={<Link href="/settings" />}
-                isActive={pathname.startsWith("/settings")}
-                tooltip="Settings"
-                className={cn(
-                  "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
-                  pathname.startsWith("/settings") &&
-                    "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
-                )}
-              >
-                <Settings className="h-4 w-4 shrink-0" />
-                <span>Settings</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
+        {/* ── Settings (reference data; admin-only edits on page) ── */}
+        {canAccessSettingsPage(userRole) ? (
+          <SidebarGroup className="mt-auto">
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/settings" />}
+                  isActive={pathname.startsWith("/settings") && !isSettingsLeafRoute}
+                  tooltip="Settings"
+                  className={cn(
+                    "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
+                    pathname.startsWith("/settings") &&
+                      !isSettingsLeafRoute &&
+                      "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
+                  )}
+                >
+                  <Settings className="h-4 w-4 shrink-0" />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {canAccessAuditLogPage(userRole) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link href="/settings/audit-log" />}
+                    isActive={pathname.startsWith("/settings/audit-log")}
+                    tooltip="Audit log"
+                    className={cn(
+                      "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
+                      pathname.startsWith("/settings/audit-log") &&
+                        "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
+                    )}
+                  >
+                    <ScrollText className="h-4 w-4 shrink-0" />
+                    <span>Audit log</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ) : null}
+              {canAccessDataQualityPage(userRole) ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link href="/settings/data-quality" />}
+                    isActive={pathname.startsWith("/settings/data-quality")}
+                    tooltip="Data quality"
+                    className={cn(
+                      "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors",
+                      pathname.startsWith("/settings/data-quality") &&
+                        "bg-sidebar-primary/12 text-sidebar-foreground ring-sidebar-primary/35 font-medium ring-1"
+                    )}
+                  >
+                    <ClipboardCheck className="h-4 w-4 shrink-0" />
+                    <span>Data quality</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ) : null}
+            </SidebarMenu>
+          </SidebarGroup>
+        ) : null}
       </SidebarContent>
 
       {/* ── Footer: log out + version ── */}
       <SidebarFooter className="border-sidebar-border gap-2 border-t px-2 py-3">
         <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              render={<Link href="/change-password" />}
+              tooltip="Change password"
+              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent w-full"
+            >
+              <KeyRound className="h-4 w-4 shrink-0" />
+              <span>Change password</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton
               type="button"

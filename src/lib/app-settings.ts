@@ -11,6 +11,10 @@ export type AppSettingsRow = {
   exceptionStaleSubmitDays: number;
   exceptionOverdueReceiveDays: number;
   exceptionMinLowStockBranches: number;
+  maintenanceBannerEnabled: boolean;
+  maintenanceBannerMessage: string;
+  maintenanceBannerStartsAt: Date | null;
+  maintenanceBannerEndsAt: Date | null;
 };
 
 export async function getAppSettings(): Promise<AppSettingsRow> {
@@ -23,6 +27,10 @@ export async function getAppSettings(): Promise<AppSettingsRow> {
       exceptionStaleSubmitDays: row.exceptionStaleSubmitDays,
       exceptionOverdueReceiveDays: row.exceptionOverdueReceiveDays,
       exceptionMinLowStockBranches: row.exceptionMinLowStockBranches,
+      maintenanceBannerEnabled: row.maintenanceBannerEnabled,
+      maintenanceBannerMessage: row.maintenanceBannerMessage,
+      maintenanceBannerStartsAt: row.maintenanceBannerStartsAt,
+      maintenanceBannerEndsAt: row.maintenanceBannerEndsAt,
     };
   }
   const created = await prisma.appSettings.create({
@@ -38,5 +46,9 @@ export async function getAppSettings(): Promise<AppSettingsRow> {
     exceptionStaleSubmitDays: created.exceptionStaleSubmitDays,
     exceptionOverdueReceiveDays: created.exceptionOverdueReceiveDays,
     exceptionMinLowStockBranches: created.exceptionMinLowStockBranches,
+    maintenanceBannerEnabled: created.maintenanceBannerEnabled,
+    maintenanceBannerMessage: created.maintenanceBannerMessage,
+    maintenanceBannerStartsAt: created.maintenanceBannerStartsAt,
+    maintenanceBannerEndsAt: created.maintenanceBannerEndsAt,
   };
 }

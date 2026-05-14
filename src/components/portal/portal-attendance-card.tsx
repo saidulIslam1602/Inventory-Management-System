@@ -20,8 +20,11 @@ type TodayAttendance = {
 
 export function PortalAttendanceCard({
   todayAttendance,
+  anchorId = "portal-check-in",
 }: {
   todayAttendance: TodayAttendance | null;
+  /** For in-page anchors from the portal hero (`#portal-check-in`). */
+  anchorId?: string;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -46,7 +49,7 @@ export function PortalAttendanceCard({
         };
 
   return (
-    <Card className="shadow-sm">
+    <Card className="shadow-sm" id={anchorId}>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">

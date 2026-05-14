@@ -6,29 +6,45 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import {
   AlertTriangle,
   ArrowRightLeft,
   BarChart3,
   Building2,
   ClipboardList,
+  FileText,
   Package,
   Users,
 } from "lucide-react";
 import { auth } from "@/lib/auth";
+import { canAccessManagerHub } from "@/lib/rbac";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { formatQuantityNbNo } from "@/lib/utils";
+import { cn, formatQuantityNbNo } from "@/lib/utils";
+import {
+  managerPendingRowAccentClass,
+  pendingApprovalAgingTier,
+  receivingPipelineAgingTier,
+} from "@/lib/manager-aging";
+import { ManagerPendingAgingBadge } from "@/components/manager/manager-pending-aging-badge";
 import { BUSINESS_TIME_ZONE } from "@/lib/business-calendar";
+import { ManagerDecisionQueueSection } from "@/components/manager/manager-decision-queue-section";
+import { ManagerHubTeamBar } from "@/components/manager/manager-hub-team-bar";
+import { ManagerExceptionEscalateButton } from "@/components/manager/manager-exception-escalate-dialog";
 import { ManagerTransferSuggestionsTable } from "@/components/manager/manager-transfer-suggestions-table";
+import { purchaseOrderIdFromException } from "@/lib/manager-exception-escalation";
 import {
   buildExceptionQueue,
+  buildManagerDecisionQueue,
   getAggregatedLowStockAlerts,
   getAttendanceSnapshotByLocation,
   getLocationScorecards,
+  getLowStockSkusAtBranch,
+  getManagerBranchOptions,
   getManagerDigestStats,
   getPendingApprovalPOs,
   getProjectPortfolio,
@@ -38,13 +54,29 @@ import {
 
 export const metadata: Metadata = { title: "Manager hub" };
 
-export default async function ManagerHubPage() {
+type PageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function ManagerHubPage({ searchParams }: PageProps) {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (session.user.role === "STAFF") redirect("/me");
-  if (!["ADMIN", "MANAGER", "VIEWER"].includes(session.user.role)) redirect("/dashboard");
+  if (!canAccessManagerHub(session.user.role)) redirect("/dashboard");
 
-  const readOnly = session.user.role === "VIEWER";
+  const sp = await searchParams;
+  const rawLoc = sp.location;
+  const locationParam =
+    typeof rawLoc === "string" ? rawLoc : Array.isArray(rawLoc) ? rawLoc[0] : undefined;
+
+  const branchLocations = await getManagerBranchOptions();
+  const branchLocationId =
+    locationParam && branchLocations.some((l) => l.id === locationParam)
+      ? locationParam
+      : undefined;
+  const branchName = branchLocationId
+    ? branchLocations.find((b) => b.id === branchLocationId)?.name
+    : undefined;
 
   const [
     scorecards,
@@ -57,16 +89,37 @@ export default async function ManagerHubPage() {
     reorderAgg,
     digest,
   ] = await Promise.all([
-    getLocationScorecards(),
-    buildExceptionQueue(),
-    getPendingApprovalPOs(),
-    getReceiveBacklog(),
-    getTransferSuggestions(20),
-    getAttendanceSnapshotByLocation(),
-    getProjectPortfolio(),
-    getAggregatedLowStockAlerts(15),
+    getLocationScorecards(branchLocationId),
+    buildExceptionQueue({ locationId: branchLocationId }),
+    getPendingApprovalPOs(branchLocationId),
+    getReceiveBacklog(branchLocationId),
+    getTransferSuggestions(20, branchLocationId),
+    getAttendanceSnapshotByLocation(branchLocationId),
+    getProjectPortfolio(branchLocationId),
+    branchLocationId
+      ? getLowStockSkusAtBranch(branchLocationId, 15)
+      : getAggregatedLowStockAlerts(15),
     getManagerDigestStats(),
   ]);
+
+  const decisionQueue = buildManagerDecisionQueue({
+    exceptions,
+    approvals,
+    receiveBacklog,
+    transfers,
+    transferLimit: 15,
+  }).slice(0, 35);
+
+  const scorecardsHeading = branchLocationId ? "Branch scorecard" : "Location scorecards";
+  const lowStockTitle = branchLocationId
+    ? `Low stock — ${branchName ?? "branch"}`
+    : "Multi-branch low stock (buy / transfer batch candidates)";
+  const lowStockDesc = branchLocationId
+    ? "SKUs at or below reorder for this branch."
+    : "SKUs below reorder in two or more locations — consolidation view.";
+  const lowStockEmpty = branchLocationId
+    ? "No SKUs below reorder at this branch."
+    : "No SKUs are low in multiple branches simultaneously.";
 
   return (
     <div className="space-y-10">
@@ -81,6 +134,12 @@ export default async function ManagerHubPage() {
                 Dashboard
               </Link>
             </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/manager/docs" target="_blank" rel="noopener noreferrer">
+                <FileText className="mr-1.5 h-4 w-4" />
+                Document portal
+              </Link>
+            </Button>
             <Button asChild size="sm">
               <Link href="/purchase-orders">
                 <ClipboardList className="mr-1.5 h-4 w-4" />
@@ -90,6 +149,19 @@ export default async function ManagerHubPage() {
           </div>
         }
       />
+
+      <Suspense fallback={null}>
+        <ManagerHubTeamBar branches={branchLocations} scopeKey={session.user.id} />
+      </Suspense>
+
+      {branchLocationId && branchName ? (
+        <p className="text-muted-foreground border-border/80 bg-muted/15 rounded-lg border px-3 py-2 text-sm">
+          Data below is scoped to <span className="text-foreground font-medium">{branchName}</span>{" "}
+          where applicable. The 7-day digest remains org-wide.
+        </p>
+      ) : null}
+
+      <ManagerDecisionQueueSection items={decisionQueue} />
 
       {/* Weekly digest */}
       <Card className="shadow-sm">
@@ -101,6 +173,12 @@ export default async function ManagerHubPage() {
           <p className="text-muted-foreground text-xs font-normal">
             Since {digest.since.toLocaleDateString("nb-NO", { timeZone: BUSINESS_TIME_ZONE })} —
             audit and planning aid
+            {branchLocationId ? (
+              <span className="text-muted-foreground/90">
+                {" "}
+                · Totals are not filtered by branch.
+              </span>
+            ) : null}
           </p>
         </CardHeader>
         <CardContent>
@@ -133,26 +211,42 @@ export default async function ManagerHubPage() {
           <p className="text-muted-foreground text-sm">No automated exceptions right now.</p>
         ) : (
           <ul className="space-y-2">
-            {exceptions.map((ex) => (
-              <li key={ex.id}>
-                <Link
-                  href={ex.href}
-                  className="border-border/80 bg-card hover:bg-muted/30 flex flex-col gap-1 rounded-xl border p-4 shadow-sm transition-colors sm:flex-row sm:items-start sm:justify-between"
-                >
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={ex.severity === "high" ? "destructive" : "secondary"}>
-                        {ex.severity}
-                      </Badge>
-                      <span className="text-muted-foreground text-xs">{ex.category}</span>
-                    </div>
-                    <p className="mt-1 font-medium">{ex.title}</p>
-                    <p className="text-muted-foreground text-sm">{ex.detail}</p>
+            {exceptions.map((ex) => {
+              const poForNote = purchaseOrderIdFromException(ex);
+              const prefill = `[${ex.category}] ${ex.title}. ${ex.detail}`;
+              return (
+                <li key={ex.id}>
+                  <div className="border-border/80 bg-card flex flex-col gap-3 rounded-xl border p-4 shadow-sm transition-colors sm:flex-row sm:items-stretch">
+                    <Link
+                      href={ex.href}
+                      className="hover:bg-muted/30 flex min-w-0 flex-1 flex-col gap-1 rounded-lg transition-colors sm:flex-row sm:items-start sm:justify-between"
+                    >
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={ex.severity === "high" ? "destructive" : "secondary"}>
+                            {ex.severity}
+                          </Badge>
+                          <span className="text-muted-foreground text-xs">{ex.category}</span>
+                        </div>
+                        <p className="mt-1 font-medium">{ex.title}</p>
+                        <p className="text-muted-foreground text-sm">{ex.detail}</p>
+                      </div>
+                      <span className="text-primary mt-2 whitespace-nowrap text-sm font-medium sm:mt-0 sm:shrink-0 sm:self-start sm:pt-1">
+                        Open →
+                      </span>
+                    </Link>
+                    {poForNote ? (
+                      <div className="flex shrink-0 justify-end sm:flex-col sm:justify-start sm:pt-0.5">
+                        <ManagerExceptionEscalateButton
+                          purchaseOrderId={poForNote}
+                          prefill={prefill}
+                        />
+                      </div>
+                    ) : null}
                   </div>
-                  <span className="text-primary whitespace-nowrap text-sm font-medium">Open →</span>
-                </Link>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -161,7 +255,7 @@ export default async function ManagerHubPage() {
       <section className="space-y-3">
         <h2 className="text-foreground flex items-center gap-2 text-lg font-semibold">
           <Building2 className="h-5 w-5" />
-          Location scorecards
+          {scorecardsHeading}
         </h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {scorecards.map((loc) => (
@@ -215,43 +309,55 @@ export default async function ManagerHubPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">PO approval inbox</CardTitle>
             <p className="text-muted-foreground text-xs font-normal">
-              {readOnly
-                ? "Read-only — approvals require Manager or Admin."
-                : "Submitted, oldest first."}
+              Submitted, oldest first.{" "}
+              <span className="text-muted-foreground/90">
+                SLA: due soon from 2d queued, over SLA from 3d.
+              </span>
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
             {approvals.length === 0 ? (
               <p className="text-muted-foreground text-sm">Nothing waiting for approval.</p>
             ) : (
-              approvals.slice(0, 12).map((po) => (
-                <div
-                  key={po.id}
-                  className="border-border/60 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                >
-                  <div>
-                    <Link
-                      href={`/purchase-orders/${po.id}`}
-                      className="text-primary font-mono text-sm font-semibold hover:underline"
-                    >
-                      {po.poNumber}
-                    </Link>
-                    <p className="text-muted-foreground text-xs">
-                      {po.supplierName} · {po.locationName}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono text-sm">
-                      kr {po.totalAmount.toLocaleString("nb-NO", { minimumFractionDigits: 2 })}
-                    </div>
-                    {po.daysWaiting > 0 && (
-                      <Badge variant="secondary" className="mt-1 text-[10px]">
-                        {po.daysWaiting}d waiting
-                      </Badge>
+              approvals.slice(0, 12).map((po) => {
+                const tier = pendingApprovalAgingTier(po.daysWaiting);
+                return (
+                  <div
+                    key={po.id}
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                      managerPendingRowAccentClass(tier)
                     )}
+                  >
+                    <div>
+                      <Link
+                        href={`/purchase-orders/${po.id}`}
+                        className="text-primary font-mono text-sm font-semibold hover:underline"
+                      >
+                        {po.poNumber}
+                      </Link>
+                      <p className="text-muted-foreground text-xs">
+                        {po.supplierName} · {po.locationName}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-mono text-sm">
+                        kr {po.totalAmount.toLocaleString("nb-NO", { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="mt-1 flex flex-col items-end gap-1">
+                        <ManagerPendingAgingBadge tier={tier} />
+                        {po.daysWaiting > 0 ? (
+                          <span className="text-muted-foreground text-[10px]">
+                            {po.daysWaiting}d in queue
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground text-[10px]">Queued today</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </CardContent>
         </Card>
@@ -261,37 +367,49 @@ export default async function ManagerHubPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Receiving pipeline</CardTitle>
             <p className="text-muted-foreground text-xs font-normal">
-              Ordered / partially received — chase suppliers and post goods-in.
+              Ordered / partially received — chase suppliers and post goods-in.{" "}
+              <span className="text-muted-foreground/90">
+                SLA: due soon from 4d since last PO update, over SLA from 7d.
+              </span>
             </p>
           </CardHeader>
           <CardContent className="space-y-2">
             {receiveBacklog.length === 0 ? (
               <p className="text-muted-foreground text-sm">No POs in receiving states.</p>
             ) : (
-              receiveBacklog.slice(0, 12).map((po) => (
-                <div
-                  key={po.id}
-                  className="border-border/60 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                >
-                  <div>
-                    <Link
-                      href={`/purchase-orders/${po.id}`}
-                      className="text-primary font-mono text-sm font-semibold hover:underline"
-                    >
-                      {po.poNumber}
-                    </Link>
-                    <p className="text-muted-foreground text-xs">
-                      {po.supplierName} · {po.locationName}
-                    </p>
+              receiveBacklog.slice(0, 12).map((po) => {
+                const tier = receivingPipelineAgingTier(po.daysSinceOrder);
+                return (
+                  <div
+                    key={po.id}
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                      managerPendingRowAccentClass(tier)
+                    )}
+                  >
+                    <div>
+                      <Link
+                        href={`/purchase-orders/${po.id}`}
+                        className="text-primary font-mono text-sm font-semibold hover:underline"
+                      >
+                        {po.poNumber}
+                      </Link>
+                      <p className="text-muted-foreground text-xs">
+                        {po.supplierName} · {po.locationName}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <StatusBadge status={po.status} />
+                      <div className="mt-1 flex flex-col items-end gap-1">
+                        <ManagerPendingAgingBadge tier={tier} />
+                        <span className="text-muted-foreground text-[10px]">
+                          {po.daysSinceOrder}d since update
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <StatusBadge status={po.status} />
-                    <p className="text-muted-foreground mt-1 text-[10px]">
-                      {po.daysSinceOrder}d since update
-                    </p>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </CardContent>
         </Card>
@@ -302,17 +420,13 @@ export default async function ManagerHubPage() {
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base font-semibold">
             <Package className="h-4 w-4" />
-            Multi-branch low stock (buy / transfer batch candidates)
+            {lowStockTitle}
           </CardTitle>
-          <p className="text-muted-foreground text-xs font-normal">
-            SKUs below reorder in two or more locations — consolidation view.
-          </p>
+          <p className="text-muted-foreground text-xs font-normal">{lowStockDesc}</p>
         </CardHeader>
         <CardContent className="p-0">
           {reorderAgg.length === 0 ? (
-            <p className="text-muted-foreground px-6 py-8 text-center text-sm">
-              No SKUs are low in multiple branches simultaneously.
-            </p>
+            <p className="text-muted-foreground px-6 py-8 text-center text-sm">{lowStockEmpty}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -320,7 +434,7 @@ export default async function ManagerHubPage() {
                   <tr className="bg-muted/30 border-b text-left text-xs uppercase tracking-wide">
                     <th className="px-4 py-2">SKU</th>
                     <th className="px-4 py-2">Product</th>
-                    <th className="px-4 py-2">Branches low</th>
+                    <th className="px-4 py-2">{branchLocationId ? "At branch" : "Branches low"}</th>
                     <th className="px-4 py-2">Total on hand</th>
                   </tr>
                 </thead>
@@ -355,7 +469,7 @@ export default async function ManagerHubPage() {
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <ManagerTransferSuggestionsTable transfers={transfers} canExecute={!readOnly} />
+          <ManagerTransferSuggestionsTable transfers={transfers} />
           <div className="border-t px-4 py-3">
             <Button asChild variant="outline" size="sm">
               <Link href="/inventory">Open inventory & movements</Link>

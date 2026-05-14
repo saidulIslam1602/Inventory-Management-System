@@ -5,8 +5,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { MovementType } from "@prisma/client";
+import { MovementType, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { auth } from "@/lib/auth";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { SavedViewsBar } from "@/components/shared/saved-views-bar";
@@ -29,6 +30,8 @@ import {
   buildStockMovementWhere,
   stockMovementListInclude,
 } from "@/lib/queries/stock-movements";
+import { canExportFinancialCsv, canViewMovementLedgerFinancialColumns } from "@/lib/rbac";
+import { movementQuantityDisplayPrefix } from "@/lib/stock-movement-display";
 
 export const metadata: Metadata = { title: "Stock Movements" };
 
@@ -37,6 +40,13 @@ type PageProps = {
 };
 
 export default async function MovementsPage({ searchParams }: PageProps) {
+  const session = await auth();
+  const staffPresetScope = session?.user?.role === UserRole.STAFF ? session.user.id : undefined;
+  const showFinancialLedgerColumns = session?.user
+    ? canViewMovementLedgerFinancialColumns(session.user.role)
+    : false;
+  const showMovementCsvExport = session?.user ? canExportFinancialCsv(session.user.role) : false;
+
   const sp = await searchParams;
   const productId = searchParamFirst(sp.product);
   const typeRaw = searchParamFirst(sp.type);
@@ -99,15 +109,45 @@ export default async function MovementsPage({ searchParams }: PageProps) {
 
   const hasFilters = Boolean(type || locationId || productId || q || dateFrom || dateTo);
 
+  const movementTableHeaders = [
+    "Date",
+    "Product",
+    "Location",
+    "Type",
+    "Qty",
+    ...(showFinancialLedgerColumns ? (["Unit cost", "Line value"] as const) : []),
+    "From → To",
+    "Note",
+    "By",
+  ] as const;
+  const movementTableColSpan = movementTableHeaders.length;
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Stock Movements"
-        description="Immutable audit log — filter, paginate, export CSV, or save views in this browser"
+        description={
+          staffPresetScope
+            ? `Immutable audit log — filter${showMovementCsvExport ? ", export CSV" : ""}, save views (presets tied to your login on this browser).`
+            : `Immutable audit log — filter, paginate${showMovementCsvExport ? ", export CSV" : ""}, or save views in this browser.`
+        }
       />
 
       <Suspense fallback={null}>
-        <SavedViewsBar storageId="stock-movements" />
+        <SavedViewsBar
+          storageId="stock-movements"
+          scopeKey={staffPresetScope}
+          hint={
+            staffPresetScope ? (
+              <>
+                Presets keep movement type, location, product id (
+                <span className="font-mono">product</span>), text search, from/to dates and rows per
+                page (<span className="font-mono">pageSize</span>). Pagination (
+                <span className="font-mono">page</span>) is stripped when saving or loading.
+              </>
+            ) : undefined
+          }
+        />
       </Suspense>
 
       <Card className="border-border border shadow-none">
@@ -130,9 +170,11 @@ export default async function MovementsPage({ searchParams }: PageProps) {
               )}
               Oslo timestamps in the table.
             </p>
-            <Button variant="outline" size="sm" asChild>
-              <a href={exportHref}>Download CSV (filtered)</a>
-            </Button>
+            {showMovementCsvExport ? (
+              <Button variant="outline" size="sm" asChild>
+                <a href={exportHref}>Download CSV (filtered)</a>
+              </Button>
+            ) : null}
           </div>
 
           <form
@@ -233,18 +275,7 @@ export default async function MovementsPage({ searchParams }: PageProps) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-border bg-muted/30 border-b">
-                  {[
-                    "Date",
-                    "Product",
-                    "Location",
-                    "Type",
-                    "Qty",
-                    "Unit cost",
-                    "Line value",
-                    "From → To",
-                    "Note",
-                    "By",
-                  ].map((h) => (
+                  {movementTableHeaders.map((h) => (
                     <th
                       key={h}
                       className="text-muted-foreground whitespace-nowrap px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider"
@@ -258,7 +289,7 @@ export default async function MovementsPage({ searchParams }: PageProps) {
                 {movements.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={movementTableColSpan}
                       className="text-muted-foreground px-4 py-12 text-center text-sm"
                     >
                       No movements match your filters.
@@ -290,25 +321,29 @@ export default async function MovementsPage({ searchParams }: PageProps) {
                         <StatusBadge status={m.type} />
                       </td>
                       <td className="px-4 py-2.5 font-mono text-sm font-semibold">
-                        {["OUT", "RESERVED"].includes(m.type) ? "-" : "+"}
+                        {movementQuantityDisplayPrefix(m.type)}
                         {formatQuantityNbNo(Number(m.quantity), m.stock.product.unit.symbol)}{" "}
                         {m.stock.product.unit.symbol}
                       </td>
-                      <td className="text-muted-foreground whitespace-nowrap px-4 py-2.5 font-mono text-xs">
-                        {m.unitCost != null
-                          ? `kr ${Number(m.unitCost).toLocaleString("nb-NO", { minimumFractionDigits: 2 })}`
-                          : "—"}
-                      </td>
-                      <td className="text-muted-foreground whitespace-nowrap px-4 py-2.5 font-mono text-xs">
-                        {m.type === "IN" && m.unitCost != null
-                          ? `kr ${(Number(m.quantity) * Number(m.unitCost)).toLocaleString(
-                              "nb-NO",
-                              {
-                                minimumFractionDigits: 2,
-                              }
-                            )}`
-                          : "—"}
-                      </td>
+                      {showFinancialLedgerColumns ? (
+                        <>
+                          <td className="text-muted-foreground whitespace-nowrap px-4 py-2.5 font-mono text-xs">
+                            {m.unitCost != null
+                              ? `kr ${Number(m.unitCost).toLocaleString("nb-NO", { minimumFractionDigits: 2 })}`
+                              : "—"}
+                          </td>
+                          <td className="text-muted-foreground whitespace-nowrap px-4 py-2.5 font-mono text-xs">
+                            {m.type === "IN" && m.unitCost != null
+                              ? `kr ${(Number(m.quantity) * Number(m.unitCost)).toLocaleString(
+                                  "nb-NO",
+                                  {
+                                    minimumFractionDigits: 2,
+                                  }
+                                )}`
+                              : "—"}
+                          </td>
+                        </>
+                      ) : null}
                       <td className="text-muted-foreground whitespace-nowrap px-4 py-2.5 text-xs">
                         {m.fromLocation && m.toLocation
                           ? `${m.fromLocation.name} → ${m.toLocation.name}`

@@ -26,7 +26,9 @@ import {
   toQueryString,
 } from "@/lib/search-params";
 import { PROJECT_STATUSES, buildProjectWhere } from "@/lib/queries/projects-list";
+import { parseDashboardPins } from "@/lib/dashboard-pins";
 import { format } from "date-fns";
+import { DashboardPinToggle } from "@/components/dashboard/dashboard-pin-toggle";
 
 export const metadata: Metadata = { title: "Projects" };
 
@@ -36,6 +38,19 @@ type PageProps = {
 
 export default async function ProjectsPage({ searchParams }: PageProps) {
   const session = await auth();
+  const isViewer = session?.user?.role === "VIEWER";
+  const viewerPinnedProjectIds =
+    isViewer && session?.user?.id
+      ? parseDashboardPins(
+          (
+            await prisma.user.findUnique({
+              where: { id: session.user.id },
+              select: { dashboardPins: true },
+            })
+          )?.dashboardPins
+        ).projectIds
+      : [];
+
   const canManage = session?.user?.role === "ADMIN" || session?.user?.role === "MANAGER";
 
   const staffSelf =
@@ -264,10 +279,11 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                     "Materials",
                     "Cost",
                     "Start",
+                    ...(isViewer ? [""] : []),
                     "",
-                  ].map((h) => (
+                  ].map((h, i) => (
                     <th
-                      key={h}
+                      key={`ph-${i}`}
                       className="text-muted-foreground whitespace-nowrap px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider"
                     >
                       {h}
@@ -279,7 +295,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                 {projectsWithCost.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={isViewer ? 11 : 10}
                       className="text-muted-foreground px-4 py-12 text-center text-sm"
                     >
                       No projects match your filters.
@@ -318,6 +334,15 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                       <td className="text-muted-foreground whitespace-nowrap px-4 py-3 text-xs">
                         {p.startDate ? format(p.startDate, "d MMM yyyy") : "—"}
                       </td>
+                      {isViewer ? (
+                        <td className="px-4 py-3">
+                          <DashboardPinToggle
+                            kind="project"
+                            entityId={p.id}
+                            initialPinned={viewerPinnedProjectIds.includes(p.id)}
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <Button variant="ghost" size="sm" asChild>
                           <Link href={`/projects/${p.id}`}>View</Link>

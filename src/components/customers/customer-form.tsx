@@ -47,7 +47,6 @@ function CustomerCreateForm({ className }: { className?: string }) {
       return;
     }
     router.push(`/customers/${r.data!.id}`);
-    router.refresh();
   }
 
   return (
@@ -152,7 +151,6 @@ function CustomerEditForm({
       return;
     }
     router.push(`/customers/${data.id}`);
-    router.refresh();
   }
 
   return (

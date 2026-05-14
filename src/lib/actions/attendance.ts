@@ -7,10 +7,11 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { todayOsloPrismaDate } from "@/lib/business-calendar";
+import { todayOsloPrismaDate, osloYmd } from "@/lib/business-calendar";
 import { isOpsRole } from "@/lib/rbac";
 import { UserMessage } from "@/lib/user-messages";
 import type { ActionResult } from "@/types";
+import { auditDataChange } from "@/lib/audit/record-event";
 
 async function getSelfServiceEmployee() {
   const session = await auth();
@@ -60,6 +61,15 @@ export async function checkInAttendance(): Promise<ActionResult> {
       return { success: false, error: "You have already checked in today." };
     }
 
+    await auditDataChange({
+      session,
+      action: "attendance.check_in",
+      summary: `Check-in recorded (${osloYmd()}).`,
+      targetType: "Employee",
+      targetId: emp.id,
+      metadata: { date: osloYmd() },
+    });
+
     revalidatePath("/me");
     revalidatePath("/dashboard");
     revalidatePath("/employees/attendance");
@@ -106,6 +116,15 @@ export async function checkOutAttendance(): Promise<ActionResult> {
         checkOut: now,
         hoursWorked,
       },
+    });
+
+    await auditDataChange({
+      session,
+      action: "attendance.check_out",
+      summary: `Check-out recorded (${hoursWorked} h worked, ${osloYmd()}).`,
+      targetType: "Employee",
+      targetId: emp.id,
+      metadata: { date: osloYmd(), hoursWorked },
     });
 
     revalidatePath("/me");

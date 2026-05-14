@@ -62,7 +62,6 @@ export function PurchaseOrderForm({
       return;
     }
     router.push("/purchase-orders");
-    router.refresh();
   }
 
   return (

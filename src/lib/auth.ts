@@ -10,11 +10,15 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import authConfig from "@/lib/auth.config";
+import { resolveUseSecureCookies } from "@/lib/auth-cookie-policy";
 import { prisma } from "@/lib/db";
 import { loginSchema } from "@/lib/validations/auth";
 
+const useSecureCookies = resolveUseSecureCookies();
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
+  ...(useSecureCookies !== undefined ? { useSecureCookies } : {}),
 
   providers: [
     Credentials({
@@ -28,7 +32,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const { email, password } = parsed.data;
+        const { email: rawEmail, password } = parsed.data;
+        const email = rawEmail.trim().toLowerCase();
 
         // Look up the user by email
         const user = await prisma.user.findUnique({
@@ -40,6 +45,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             passwordHash: true,
             role: true,
             isActive: true,
+            mustChangePassword: true,
           },
         });
 
@@ -54,6 +60,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           name: user.name,
           email: user.email,
           role: user.role,
+          mustChangePassword: user.mustChangePassword,
         };
       },
     }),

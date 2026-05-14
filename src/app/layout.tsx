@@ -10,6 +10,7 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
+import { PortalDomPolyfill } from "@/components/providers/portal-dom-polyfill";
 import "./globals.css";
 
 // Inter — the standard choice for professional Norwegian SaaS UIs
@@ -38,7 +39,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="no" className={`${inter.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">
+      <body className="flex min-h-full flex-col">
+        <PortalDomPolyfill />
         <SessionProvider>{children}</SessionProvider>
       </body>
     </html>

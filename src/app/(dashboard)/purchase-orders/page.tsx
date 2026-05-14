@@ -6,7 +6,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { Plus } from "lucide-react";
-import { POStatus } from "@prisma/client";
+import { POStatus, UserRole } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { PageHeader } from "@/components/shared/page-header";
@@ -37,6 +37,7 @@ type PageProps = {
 export default async function PurchaseOrdersPage({ searchParams }: PageProps) {
   const session = await auth();
   const canCreate = session?.user?.role === "ADMIN" || session?.user?.role === "MANAGER";
+  const staffPresetScope = session?.user?.role === UserRole.STAFF ? session.user.id : undefined;
 
   const sp = await searchParams;
   const statusRaw = searchParamFirst(sp.status);
@@ -123,7 +124,18 @@ export default async function PurchaseOrdersPage({ searchParams }: PageProps) {
       />
 
       <Suspense fallback={null}>
-        <SavedViewsBar storageId="purchase-orders" />
+        <SavedViewsBar
+          storageId="purchase-orders"
+          scopeKey={staffPresetScope}
+          hint={
+            <>
+              Presets keep status, supplier, deliver-to, and search (
+              <span className="font-mono">q</span>), plus rows-per-page (
+              <span className="font-mono">pageSize</span>). Pagination (
+              <span className="font-mono">page</span>) is stripped when saving or loading.
+            </>
+          }
+        />
       </Suspense>
 
       <Card className="border-border border shadow-none">

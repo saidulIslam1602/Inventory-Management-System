@@ -19,3 +19,23 @@ export const exceptionThresholdSettingsSchema = z.object({
 });
 
 export type ExceptionThresholdSettingsInput = z.infer<typeof exceptionThresholdSettingsSchema>;
+
+export const featureFlagsSettingsSchema = z.object({
+  managerHub: z.boolean(),
+  purchaseOrders: z.boolean(),
+  employees: z.boolean(),
+  projects: z.boolean(),
+  customers: z.boolean(),
+  reports: z.boolean(),
+});
+
+export type FeatureFlagsSettingsInput = z.infer<typeof featureFlagsSettingsSchema>;
+
+export const maintenanceBannerSettingsSchema = z.object({
+  maintenanceBannerEnabled: z.boolean(),
+  maintenanceBannerMessage: z.string().max(500, "Message must be at most 500 characters."),
+  maintenanceBannerStartsAt: z.string().optional(),
+  maintenanceBannerEndsAt: z.string().optional(),
+});
+
+export type MaintenanceBannerSettingsInput = z.infer<typeof maintenanceBannerSettingsSchema>;

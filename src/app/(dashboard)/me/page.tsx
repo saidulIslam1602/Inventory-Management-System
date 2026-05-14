@@ -18,16 +18,27 @@ import {
   todayOsloPrismaDate,
 } from "@/lib/business-calendar";
 import { PortalAttendanceCard } from "@/components/portal/portal-attendance-card";
+import { PortalStaffTodayHero } from "@/components/portal/portal-staff-today-hero";
+import { PortalStaffListShortcuts } from "@/components/portal/portal-staff-list-shortcuts";
 import { PortalProfileForm } from "@/components/portal/portal-profile-form";
 import { PortalNotificationPreferencesForm } from "@/components/portal/portal-notification-preferences-form";
 import { PortalNotificationsList } from "@/components/portal/portal-notifications-list";
 import { ensureDailyDigestForUser } from "@/lib/notifications/daily-digest";
 import {
   wantsDigestDaily,
+  wantsEmailApprovalEscalation,
   wantsEmailDigestDaily,
   wantsInstantPoEvent,
 } from "@/lib/notification-preferences";
-import { ScanBarcode, LayoutDashboard, FolderKanban, Package, Bell } from "lucide-react";
+import {
+  ScanBarcode,
+  LayoutDashboard,
+  FolderKanban,
+  Package,
+  Bell,
+  ArrowDownCircle,
+  FileSpreadsheet,
+} from "lucide-react";
 import { formatQuantityNbNo } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My portal" };
@@ -61,6 +72,7 @@ export default async function EmployeePortalPage() {
     lowStockRows,
     teamPeers,
     notificationPrefsRow,
+    inboundPurchaseOrdersCount,
   ] = await Promise.all([
     emp
       ? prisma.attendance.findUnique({
@@ -142,6 +154,14 @@ export default async function EmployeePortalPage() {
       where: { id: session.user.id },
       select: { notificationPreferences: true },
     }),
+    emp
+      ? prisma.purchaseOrder.count({
+          where: {
+            locationId: emp.locationId,
+            status: { in: ["ORDERED", "PARTIALLY_RECEIVED"] },
+          },
+        })
+      : Promise.resolve(0),
   ]);
 
   const teamAttendance =
@@ -160,10 +180,23 @@ export default async function EmployeePortalPage() {
     session.user.role === UserRole.MANAGER ||
     session.user.role === UserRole.ADMIN;
 
+  const unreadNotificationsCount = notifications.filter((n) => !n.isRead).length;
+  const activeProjectAssignmentsCount = projectRows.filter(
+    (r) => r.project.status === "IN_PROGRESS"
+  ).length;
+  const nextShiftHero = shifts[0];
+  const todayLabelOslo = now.toLocaleDateString("nb-NO", {
+    timeZone: BUSINESS_TIME_ZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
   return (
     <div className="space-y-8">
       <PageHeader
-        title={emp ? `Hi, ${emp.firstName}` : "My portal"}
+        title={emp ? (showOpsCards ? "My portal" : `Hi, ${emp.firstName}`) : "My portal"}
         description={
           emp
             ? `${emp.employeeCode} · ${emp.location.name}${
@@ -172,6 +205,24 @@ export default async function EmployeePortalPage() {
             : "Your account is not linked to an employee profile. Use the main dashboard and settings, or contact HR."
         }
       />
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <FileSpreadsheet className="text-primary h-4 w-4" aria-hidden />
+            CSV export attestations
+          </CardTitle>
+          <p className="text-muted-foreground text-xs font-normal leading-relaxed">
+            See when you downloaded spreadsheets via Aqila&apos;s export endpoints (the same events
+            administrators can review org-wide in the audit log).
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/me/my-exports">View my export log</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {!emp && (
         <Card className="border-warning/35 bg-warning/10 shadow-sm">
@@ -192,6 +243,42 @@ export default async function EmployeePortalPage() {
       )}
 
       {emp && showOpsCards && (
+        <PortalStaffTodayHero
+          firstName={emp.firstName}
+          locationName={emp.location.name}
+          todayLabel={todayLabelOslo}
+          attendance={
+            todayAttendance
+              ? {
+                  checkIn: todayAttendance.checkIn,
+                  checkOut: todayAttendance.checkOut,
+                  hoursWorked:
+                    todayAttendance.hoursWorked != null
+                      ? Number(todayAttendance.hoursWorked)
+                      : null,
+                }
+              : null
+          }
+          nextShift={
+            nextShiftHero
+              ? {
+                  startTime: nextShiftHero.startTime,
+                  endTime: nextShiftHero.endTime,
+                  title: nextShiftHero.title ?? null,
+                }
+              : null
+          }
+          inboundPurchaseOrdersCount={inboundPurchaseOrdersCount}
+          unreadNotificationsCount={unreadNotificationsCount}
+          activeProjectAssignmentsCount={activeProjectAssignmentsCount}
+        />
+      )}
+
+      {emp && session.user.role === UserRole.STAFF && (
+        <PortalStaffListShortcuts locationId={emp.locationId} locationName={emp.location.name} />
+      )}
+
+      {emp && showOpsCards && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <PortalAttendanceCard
             todayAttendance={
@@ -200,7 +287,10 @@ export default async function EmployeePortalPage() {
                     checkIn: todayAttendance.checkIn,
                     checkOut: todayAttendance.checkOut,
                     status: todayAttendance.status,
-                    hoursWorked: todayAttendance.hoursWorked,
+                    hoursWorked:
+                      todayAttendance.hoursWorked != null
+                        ? Number(todayAttendance.hoursWorked)
+                        : null,
                   }
                 : null
             }
@@ -218,9 +308,19 @@ export default async function EmployeePortalPage() {
                 variant="outline"
                 className="h-auto min-h-11 justify-start gap-2 py-2.5"
               >
-                <Link href="/inventory/receive">
-                  <ScanBarcode className="text-primary h-4 w-4 shrink-0" />
-                  <span className="text-left leading-snug">Receive goods (scan)</span>
+                <Link href="/inventory/receive#receive-po-wizard">
+                  <ArrowDownCircle className="text-primary h-4 w-4 shrink-0" aria-hidden />
+                  <span className="text-left leading-snug">Receive vs PO (wizard)</span>
+                </Link>
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+                className="h-auto min-h-11 justify-start gap-2 py-2.5"
+              >
+                <Link href="/inventory/receive#quick-receive">
+                  <ScanBarcode className="text-primary h-4 w-4 shrink-0" aria-hidden />
+                  <span className="text-left leading-snug">Quick scan (no PO)</span>
                 </Link>
               </Button>
               <Button
@@ -491,8 +591,15 @@ export default async function EmployeePortalPage() {
             notificationPrefsRow?.notificationPreferences,
             "poReceived"
           ),
+          poApprovalEscalation: wantsInstantPoEvent(
+            notificationPrefsRow?.notificationPreferences,
+            "poApprovalEscalation"
+          ),
           digestDaily: wantsDigestDaily(notificationPrefsRow?.notificationPreferences),
           emailDigestDaily: wantsEmailDigestDaily(notificationPrefsRow?.notificationPreferences),
+          emailApprovalEscalation: wantsEmailApprovalEscalation(
+            notificationPrefsRow?.notificationPreferences
+          ),
         }}
       />
 
@@ -530,7 +637,9 @@ export default async function EmployeePortalPage() {
         </CardContent>
       </Card>
 
-      {emp && showOpsCards && <PortalProfileForm phone={emp.phone} address={emp.address} />}
+      {emp && (
+        <PortalProfileForm phone={emp.phone} address={emp.address} nationality={emp.nationality} />
+      )}
     </div>
   );
 }

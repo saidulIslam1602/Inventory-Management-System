@@ -30,37 +30,57 @@ export function HeaderNotificationsMenu({ unreadCount }: { unreadCount: number }
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = React.useState(false);
+  const openRef = React.useRef(false);
+
+  React.useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  /** Monotonic stamp so stale responses cannot overwrite newer fetches after rapid open/path changes */
+  const fetchGen = React.useRef(0);
+
   const [items, setItems] = React.useState<ApiNotification[] | null>(null);
   const [loading, setLoading] = React.useState(false);
 
+  const loadNotifications = React.useCallback(() => {
+    const seq = ++fetchGen.current;
+    setLoading(true);
+    void fetch("/api/notifications/recent")
+      .then((r) => r.json() as Promise<{ notifications: ApiNotification[] }>)
+      .then((j) => {
+        if (seq !== fetchGen.current) return;
+        setItems(j.notifications ?? []);
+      })
+      .catch(() => {
+        if (seq !== fetchGen.current) return;
+        setItems([]);
+      })
+      .finally(() => {
+        if (seq !== fetchGen.current) return;
+        setLoading(false);
+      });
+  }, []);
+
+  // Refetch when route changes while the menu is still open — deferred so setState stays out of effect body
   React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    void Promise.resolve().then(() => {
-      if (cancelled) return;
-      setLoading(true);
-      void fetch("/api/notifications/recent")
-        .then((r) => r.json() as Promise<{ notifications: ApiNotification[] }>)
-        .then((j) => {
-          if (!cancelled) setItems(j.notifications ?? []);
-        })
-        .catch(() => {
-          if (!cancelled) setItems([]);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, pathname]);
+    const id = window.setTimeout(() => {
+      if (!openRef.current) return;
+      loadNotifications();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [pathname, loadNotifications]);
+
+  function onOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) {
+      loadNotifications();
+    }
+  }
 
   async function onOpenRow(id: string, href: string, isRead: boolean) {
     if (!isRead) await markNotificationRead(id);
     setOpen(false);
     router.push(href);
-    router.refresh();
   }
 
   async function onMarkAll() {
@@ -70,7 +90,7 @@ export function HeaderNotificationsMenu({ unreadCount }: { unreadCount: number }
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         className={cn(
           "text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2"

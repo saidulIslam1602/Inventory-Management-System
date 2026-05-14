@@ -63,10 +63,11 @@ function roundQty(n: number): number {
 
 export function ManagerTransferSuggestionsTable({
   transfers,
-  canExecute,
+  canExecute = true,
 }: {
   transfers: TransferSuggestion[];
-  canExecute: boolean;
+  /** When false, hides execute controls (e.g. read-only preview). */
+  canExecute?: boolean;
 }) {
   if (transfers.length === 0) {
     return (

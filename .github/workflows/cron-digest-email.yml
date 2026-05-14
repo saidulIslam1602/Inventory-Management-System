@@ -1,0 +1,26 @@
+name: Cron — digest email
+
+# Calls production **`GET /api/cron/digest-email`** with bearer **`CRON_SECRET`**.
+#
+# Repository secrets (GitHub → Settings → Secrets → Actions):
+#   CRON_DIGEST_URL  — full URL, e.g. https://ims.example.com/api/cron/digest-email
+#   CRON_SECRET      — must match app env (≥24 chars in production)
+
+on:
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger digest
+        env:
+          CRON_DIGEST_URL: ${{ secrets.CRON_DIGEST_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "${CRON_DIGEST_URL:-}" || { echo "Missing CRON_DIGEST_URL secret"; exit 1; }
+          test -n "${CRON_SECRET:-}" || { echo "Missing CRON_SECRET secret"; exit 1; }
+          curl -sfS -H "Authorization: Bearer ${CRON_SECRET}" "${CRON_DIGEST_URL}"

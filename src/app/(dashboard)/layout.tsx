@@ -17,6 +17,9 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
+import { getResolvedFeatureFlags } from "@/lib/feature-flags-server";
+import { getActiveMaintenanceBannerMessage } from "@/lib/maintenance-banner-server";
+import { MaintenanceBanner } from "@/components/layout/maintenance-banner";
 
 /** Skip Prisma during `next build` static phase when no database is reachable (CI / fresh clone). */
 export const dynamic = "force-dynamic";
@@ -27,29 +30,36 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   // Fetch sidebar badge counts (low-stock alerts, pending POs, unread notifications)
   // Low-stock requires a raw query since Prisma cannot compare two columns in a where clause
-  const [lowStockResult, pendingPOCount, notificationCount, employeeForSidebar] = await Promise.all(
-    [
-      prisma.$queryRaw<[{ count: bigint }]>`
+  const [
+    lowStockResult,
+    pendingPOCount,
+    notificationCount,
+    employeeForSidebar,
+    featureFlags,
+    maintenanceBannerMessage,
+  ] = await Promise.all([
+    prisma.$queryRaw<[{ count: bigint }]>`
       SELECT COUNT(*) as count FROM stock WHERE quantity <= "reorderPoint" AND "reorderPoint" > 0
     `.catch(() => [{ count: BigInt(0) }]),
-      prisma.purchaseOrder
-        .count({
-          where: { status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
-        })
-        .catch(() => 0),
-      prisma.notification
-        .count({
-          where: { userId: session.user.id, isRead: false },
-        })
-        .catch(() => 0),
-      prisma.employee
-        .findUnique({
-          where: { userId: session.user.id },
-          select: { locationId: true },
-        })
-        .catch(() => null),
-    ]
-  );
+    prisma.purchaseOrder
+      .count({
+        where: { status: { in: ["DRAFT", "SUBMITTED", "APPROVED"] } },
+      })
+      .catch(() => 0),
+    prisma.notification
+      .count({
+        where: { userId: session.user.id, isRead: false },
+      })
+      .catch(() => 0),
+    prisma.employee
+      .findUnique({
+        where: { userId: session.user.id },
+        select: { locationId: true },
+      })
+      .catch(() => null),
+    getResolvedFeatureFlags(),
+    getActiveMaintenanceBannerMessage(),
+  ]);
 
   const lowStockCount = Number(lowStockResult[0]?.count ?? 0);
 
@@ -75,8 +85,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
           userRole={session.user.role}
           lowStockCount={inventoryBadgeCount}
           pendingPOCount={pendingPOCount}
+          featureFlags={featureFlags}
         />
         <SidebarInset className="bg-transparent">
+          {maintenanceBannerMessage ? (
+            <MaintenanceBanner message={maintenanceBannerMessage} />
+          ) : null}
           <Header user={session.user} notificationCount={notificationCount} />
           <div className="relative isolate flex min-h-[calc(100vh-3.5rem)] flex-1 flex-col">
             <div
